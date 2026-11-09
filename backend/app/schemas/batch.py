@@ -5,10 +5,10 @@ from app.schemas.student import StudentResponse
 
 
 class BatchBase(BaseModel):
-    name: str = Field(..., example="Class 10 - Mathematics")
-    subject: str = Field(..., example="Mathematics")
-    description: Optional[str] = Field(None, example="Morning regular batch covering algebra and geometry")
-    teacher_id: Optional[int] = Field(None, example=2)
+    name: str = Field(..., examples=["Class 10 - Mathematics"])
+    subject: str = Field(..., examples=["Mathematics"])
+    description: Optional[str] = Field(None, examples=["Morning regular batch covering algebra and geometry"])
+    teacher_id: Optional[int] = Field(None, examples=[2])
 
 
 class BatchCreate(BatchBase):
@@ -41,4 +41,4 @@ class BatchDetailResponse(BatchBase):
 
 
 class EnrollStudentRequest(BaseModel):
-    student_id: int = Field(..., example=1)
+    student_id: int = Field(..., examples=[1])

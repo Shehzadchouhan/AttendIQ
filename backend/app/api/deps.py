@@ -60,3 +60,41 @@ def require_admin(
             detail="Operation requires Admin privileges"
         )
     return current_user
+
+
+def verify_student_access(
+    student_id: int,
+    current_user: User,
+    db: Session
+):
+    """
+    Verifies that the current user has permission to access the student:
+    - Admins can access any student.
+    - Teachers can only access students enrolled in at least one batch they teach.
+    """
+    from app.models.student import Student
+    from app.models.batch import Batch, Enrollment
+
+    student = db.query(Student).filter(Student.id == student_id).first()
+    if not student:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Student with ID {student_id} not found."
+        )
+
+    if current_user.role != UserRole.ADMIN.value:
+        # Check if student is enrolled in any batch taught by this teacher
+        has_enrollment = db.query(Enrollment.id).join(
+            Batch, Batch.id == Enrollment.batch_id
+        ).filter(
+            Enrollment.student_id == student_id,
+            Batch.teacher_id == current_user.id
+        ).first()
+
+        if not has_enrollment:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You do not have permission to access face data for this student."
+            )
+
+    return student

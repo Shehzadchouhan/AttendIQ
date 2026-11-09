@@ -38,10 +38,20 @@ services:
       - SEED_TEACHER_EMAIL=${SEED_TEACHER_EMAIL:-teacher@facemark.local}
       - SEED_TEACHER_PASSWORD=${SEED_TEACHER_PASSWORD:-teacher123}
       - INITIAL_TEACHER_NAME=${INITIAL_TEACHER_NAME:-Prof. Sharma}
+      - MODEL_NAME=${MODEL_NAME:-buffalo_l}
+      - DETECTION_SIZE=${DETECTION_SIZE:-640}
+      - RECOGNITION_DET_SIZE=${RECOGNITION_DET_SIZE:-1280}
+      - MATCH_THRESHOLD=${MATCH_THRESHOLD:-0.45}
+      - REVIEW_THRESHOLD=${REVIEW_THRESHOLD:-0.35}
+      - MIN_FACE_WIDTH=${MIN_FACE_WIDTH:-80}
+      - MIN_DET_SCORE=${MIN_DET_SCORE:-0.6}
+      - MAX_UPLOAD_MB=${MAX_UPLOAD_MB:-10}
+      - MAX_IMAGE_MEGAPIXELS=${MAX_IMAGE_MEGAPIXELS:-40}
     ports:
       - "8000:8000"
     volumes:
       - ./backend:/app
+      - insightface_models:/root/.insightface
     # Runs migrations, seeds initial admin & teacher, then launches FastAPI with hot reload
     command: ["sh", "-c", "alembic upgrade head && python seed.py && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"]
 
@@ -63,3 +73,4 @@ services:
 
 volumes:
   postgres_data:
+  insightface_models:

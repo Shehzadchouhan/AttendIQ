@@ -1,7 +1,8 @@
 from app.schemas.token import Token, TokenPayload
 from app.schemas.user import UserBase, UserCreate, UserLogin, UserResponse
-from app.schemas.student import StudentBase, StudentCreate, StudentUpdate, StudentResponse
+from app.schemas.student import StudentBase, StudentCreate, StudentUpdate, StudentResponse, StudentConsentUpdate, StudentFacesResponse
 from app.schemas.batch import BatchBase, BatchCreate, BatchUpdate, BatchResponse, BatchDetailResponse, EnrollStudentRequest
+from app.schemas.attendance import FaceDetectionResult, AttendanceRecognizeResponse
 
 __all__ = [
     "Token",
@@ -14,10 +15,14 @@ __all__ = [
     "StudentCreate",
     "StudentUpdate",
     "StudentResponse",
+    "StudentConsentUpdate",
+    "StudentFacesResponse",
     "BatchBase",
     "BatchCreate",
     "BatchUpdate",
     "BatchResponse",
     "BatchDetailResponse",
     "EnrollStudentRequest",
+    "FaceDetectionResult",
+    "AttendanceRecognizeResponse",
 ]

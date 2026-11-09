@@ -37,6 +37,17 @@ app.add_middleware(
 app.include_router(api_router, prefix=settings.API_V1_STR)
 
 
+@app.on_event("startup")
+def startup_event():
+    """
+    Application startup event handler:
+    Pre-loads (warms up) the InsightFace recognition model weights into memory on startup
+    to prevent cold-start latency on the first request.
+    """
+    from app.services.face_engine import face_engine
+    face_engine.initialize()
+
+
 @app.get("/health", tags=["Health"])
 def health_check():
     """

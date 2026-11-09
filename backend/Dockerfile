@@ -6,13 +6,19 @@ FROM python:3.11-slim
 ENV PYTHONDONTWRITEBYTECODE=1
 # Prevents Python from buffering stdout and stderr
 ENV PYTHONUNBUFFERED=1
+# Store downloaded InsightFace models in persistent volume directory
+ENV INSIGHTFACE_HOME=/root/.insightface
 
 WORKDIR /app
 
-# Install system dependencies needed for compiling psycopg2 and cryptography
+# Install system dependencies needed for psycopg2, cryptography, and OpenCV / InsightFace
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    g++ \
     gcc \
     libpq-dev \
+    libgl1 \
+    libglib2.0-0 \
     curl \
     && rm -rf /var/lib/apt/lists/*
 

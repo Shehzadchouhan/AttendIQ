@@ -1,5 +1,18 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Search, Edit2, Trash2, UserPlus, X, AlertCircle } from 'lucide-react';
+import {
+  Plus,
+  Search,
+  Edit2,
+  Trash2,
+  UserPlus,
+  X,
+  AlertCircle,
+  Camera,
+  CheckCircle2,
+  Upload,
+  ShieldCheck,
+  UserCheck
+} from 'lucide-react';
 import apiClient from '../api/client';
 import { useAuth } from '../context/AuthContext';
 
@@ -9,7 +22,7 @@ const Students = () => {
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
 
-  // Modal State
+  // Student Create/Edit Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingStudent, setEditingStudent] = useState(null);
   const [formError, setFormError] = useState('');
@@ -20,6 +33,21 @@ const Students = () => {
     phone: '',
     is_active: true,
   });
+
+  // Face Enrollment Modal State
+  const [isFaceModalOpen, setIsFaceModalOpen] = useState(false);
+  const [selectedStudent, setSelectedStudent] = useState(null);
+  const [faceData, setFaceData] = useState({
+    enrolled_count: 0,
+    consent_given: false,
+    consent_at: null,
+  });
+  const [faceLoading, setFaceLoading] = useState(false);
+  const [faceError, setFaceError] = useState('');
+  const [faceSuccess, setFaceSuccess] = useState('');
+  const [selectedPhotos, setSelectedPhotos] = useState([]);
+  const [photoPreviews, setPhotoPreviews] = useState([]);
+  const [uploadingFaces, setUploadingFaces] = useState(false);
 
   const fetchStudents = async (query = '') => {
     try {
@@ -70,10 +98,8 @@ const Students = () => {
 
     try {
       if (editingStudent) {
-        // Update existing student
         await apiClient.put(`/students/${editingStudent.id}`, formData);
       } else {
-        // Create new student
         await apiClient.post('/students/', formData);
       }
       setIsModalOpen(false);
@@ -91,7 +117,11 @@ const Students = () => {
       return;
     }
 
-    if (window.confirm(`Are you sure you want to delete student "${studentName}"? This will cascade remove their enrollments and attendance records.`)) {
+    if (
+      window.confirm(
+        `Are you sure you want to delete student "${studentName}"? This will cascade remove their enrollments, face data, and attendance records.`
+      )
+    ) {
       try {
         await apiClient.delete(`/students/${studentId}`);
         fetchStudents(search);
@@ -101,13 +131,149 @@ const Students = () => {
     }
   };
 
+  // ==========================================
+  // FACE ENROLLMENT HANDLERS
+  // ==========================================
+  const handleOpenFaceModal = async (student) => {
+    setSelectedStudent(student);
+    setFaceError('');
+    setFaceSuccess('');
+    setSelectedPhotos([]);
+    setPhotoPreviews([]);
+    setIsFaceModalOpen(true);
+    setFaceLoading(true);
+
+    try {
+      const res = await apiClient.get(`/students/${student.id}/faces`);
+      setFaceData(res.data);
+    } catch (err) {
+      setFaceError(err.response?.data?.detail || 'Failed to fetch face enrollment status.');
+    } finally {
+      setFaceLoading(false);
+    }
+  };
+
+  const handleConsentToggle = async (e) => {
+    const isChecked = e.target.checked;
+    setFaceError('');
+    setFaceSuccess('');
+
+    if (!isChecked && faceData.enrolled_count > 0) {
+      const confirmRevoke = window.confirm(
+        'Revoking consent will immediately delete all enrolled face embeddings for this student. Do you wish to continue?'
+      );
+      if (!confirmRevoke) return;
+    }
+
+    try {
+      const res = await apiClient.patch(`/students/${selectedStudent.id}/consent`, {
+        consent_given: isChecked,
+      });
+      setFaceData((prev) => ({
+        ...prev,
+        consent_given: res.data.consent_given,
+        consent_at: res.data.consent_at,
+        enrolled_count: isChecked ? prev.enrolled_count : 0,
+      }));
+      setFaceSuccess(
+        isChecked
+          ? 'Consent recorded. You may now upload face portrait photos.'
+          : 'Consent revoked and face data removed.'
+      );
+      fetchStudents(search);
+    } catch (err) {
+      setFaceError(err.response?.data?.detail || 'Failed to update consent.');
+    }
+  };
+
+  const handlePhotoSelect = (e) => {
+    const files = Array.from(e.target.files);
+    if (!files.length) return;
+
+    if (files.length > 5) {
+      setFaceError('You can upload at most 5 photos at a time.');
+      return;
+    }
+
+    setFaceError('');
+    setSelectedPhotos(files);
+
+    // Create thumbnail previews
+    const previews = files.map((file) => URL.createObjectURL(file));
+    setPhotoPreviews(previews);
+  };
+
+  const handleRemovePhoto = (index) => {
+    const updatedPhotos = selectedPhotos.filter((_, i) => i !== index);
+    const updatedPreviews = photoPreviews.filter((_, i) => i !== index);
+    setSelectedPhotos(updatedPhotos);
+    setPhotoPreviews(updatedPreviews);
+  };
+
+  const handleUploadFaces = async (e) => {
+    e.preventDefault();
+    if (!selectedPhotos.length) {
+      setFaceError('Please select 1 to 5 face portrait photos to upload.');
+      return;
+    }
+
+    setFaceError('');
+    setFaceSuccess('');
+    setUploadingFaces(true);
+
+    const formDataUpload = new FormData();
+    selectedPhotos.forEach((file) => {
+      formDataUpload.append('photos', file);
+    });
+
+    try {
+      const res = await apiClient.post(`/students/${selectedStudent.id}/faces`, formDataUpload, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      setFaceSuccess(res.data.message);
+      setFaceData((prev) => ({ ...prev, enrolled_count: res.data.enrolled_count }));
+      setSelectedPhotos([]);
+      setPhotoPreviews([]);
+      fetchStudents(search);
+    } catch (err) {
+      setFaceError(
+        err.response?.data?.detail ||
+          'Failed to enroll face photos. Please ensure each photo has exactly one face.'
+      );
+    } finally {
+      setUploadingFaces(false);
+    }
+  };
+
+  const handleDeleteFaceData = async () => {
+    if (
+      !window.confirm(
+        `Are you sure you want to delete all enrolled face embeddings for ${selectedStudent.full_name}?`
+      )
+    ) {
+      return;
+    }
+
+    setFaceError('');
+    setFaceSuccess('');
+
+    try {
+      await apiClient.delete(`/students/${selectedStudent.id}/faces`);
+      setFaceSuccess('All face embeddings deleted successfully.');
+      setFaceData((prev) => ({ ...prev, enrolled_count: 0 }));
+      fetchStudents(search);
+    } catch (err) {
+      setFaceError(err.response?.data?.detail || 'Failed to delete face data.');
+    }
+  };
+
   return (
     <div className="page-container">
       {/* Header */}
       <div className="page-header">
         <div>
           <h1 className="page-title">Students Management</h1>
-          <p className="page-subtitle">Register and manage tuition student profiles</p>
+          <p className="page-subtitle">Register students, manage profiles and face enrollment</p>
         </div>
         <button onClick={handleOpenAddModal} className="btn btn-primary">
           <UserPlus size={18} /> Add New Student
@@ -139,26 +305,32 @@ const Students = () => {
               <th>Email</th>
               <th>Phone</th>
               <th>Status</th>
+              <th>Face Data Consent</th>
               <th style={{ textAlign: 'right' }}>Actions</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan="7" style={{ textAlign: 'center', padding: '2rem' }}>
+                <td colSpan="8" style={{ textAlign: 'center', padding: '2rem' }}>
                   Loading students...
                 </td>
               </tr>
             ) : students.length === 0 ? (
               <tr>
-                <td colSpan="7" style={{ textAlign: 'center', padding: '2.5rem', color: 'var(--text-secondary)' }}>
+                <td
+                  colSpan="8"
+                  style={{ textAlign: 'center', padding: '2.5rem', color: 'var(--text-secondary)' }}
+                >
                   No students found. Click "Add New Student" to get started!
                 </td>
               </tr>
             ) : (
               students.map((student) => (
                 <tr key={student.id}>
-                  <td><strong>#{student.id}</strong></td>
+                  <td>
+                    <strong>#{student.id}</strong>
+                  </td>
                   <td>
                     <span style={{ fontWeight: 600, color: 'var(--primary)' }}>
                       {student.roll_number}
@@ -172,8 +344,33 @@ const Students = () => {
                       {student.is_active ? 'Active' : 'Inactive'}
                     </span>
                   </td>
+                  <td>
+                    {student.consent_given ? (
+                      <span
+                        className="badge"
+                        style={{ backgroundColor: '#ecfdf5', color: '#047857', gap: '0.25rem' }}
+                      >
+                        <ShieldCheck size={13} /> Consent Active
+                      </span>
+                    ) : (
+                      <span
+                        className="badge"
+                        style={{ backgroundColor: '#f1f5f9', color: '#64748b' }}
+                      >
+                        No Consent
+                      </span>
+                    )}
+                  </td>
                   <td style={{ textAlign: 'right' }}>
                     <div style={{ display: 'inline-flex', gap: '0.4rem' }}>
+                      <button
+                        onClick={() => handleOpenFaceModal(student)}
+                        className="btn btn-secondary btn-icon"
+                        title="Face Enrollment & Consent"
+                        style={{ color: 'var(--primary)', borderColor: 'var(--primary-light)' }}
+                      >
+                        <Camera size={16} />
+                      </button>
                       <button
                         onClick={() => handleOpenEditModal(student)}
                         className="btn btn-secondary btn-icon"
@@ -307,6 +504,251 @@ const Students = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* PHASE 2: FACE ENROLLMENT MODAL */}
+      {isFaceModalOpen && selectedStudent && (
+        <div className="modal-overlay">
+          <div className="modal-content" style={{ maxWidth: '600px' }}>
+            <div className="modal-header">
+              <div>
+                <h3 className="modal-title">Face Enrollment</h3>
+                <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                  {selectedStudent.full_name} ({selectedStudent.roll_number})
+                </div>
+              </div>
+              <button
+                onClick={() => setIsFaceModalOpen(false)}
+                style={{ background: 'transparent', border: 'none', cursor: 'pointer' }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="modal-body">
+              {faceError && (
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    backgroundColor: 'var(--danger-light)',
+                    color: 'var(--danger)',
+                    padding: '0.75rem',
+                    borderRadius: 'var(--radius-sm)',
+                    fontSize: '0.85rem',
+                    marginBottom: '1rem',
+                  }}
+                >
+                  <AlertCircle size={16} />
+                  <span>{faceError}</span>
+                </div>
+              )}
+
+              {faceSuccess && (
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    backgroundColor: 'var(--success-light)',
+                    color: '#047857',
+                    padding: '0.75rem',
+                    borderRadius: 'var(--radius-sm)',
+                    fontSize: '0.85rem',
+                    marginBottom: '1rem',
+                  }}
+                >
+                  <CheckCircle2 size={16} />
+                  <span>{faceSuccess}</span>
+                </div>
+              )}
+
+              {/* 1. Consent Box */}
+              <div
+                style={{
+                  padding: '1rem',
+                  background: '#f8fafc',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: 'var(--radius-sm)',
+                  marginBottom: '1.25rem',
+                }}
+              >
+                <label
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.6rem',
+                    fontWeight: 700,
+                    fontSize: '0.925rem',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={faceData.consent_given}
+                    onChange={handleConsentToggle}
+                    style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+                  />
+                  <span>Consent to store face data</span>
+                </label>
+                <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '0.35rem', marginLeft: '1.7rem' }}>
+                  Authorizes feature vector generation for attendance recognition. No raw photos are stored.
+                </p>
+                {faceData.consent_at && (
+                  <div
+                    style={{
+                      fontSize: '0.75rem',
+                      color: '#047857',
+                      marginTop: '0.35rem',
+                      marginLeft: '1.7rem',
+                      fontWeight: 600,
+                    }}
+                  >
+                    Consent recorded on: {new Date(faceData.consent_at).toLocaleDateString()}
+                  </div>
+                )}
+              </div>
+
+              {/* 2. Enrolled Status Metric */}
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '0.75rem 1rem',
+                  background: '#f1f5f9',
+                  borderRadius: 'var(--radius-sm)',
+                  marginBottom: '1.25rem',
+                }}
+              >
+                <span style={{ fontSize: '0.875rem', fontWeight: 600 }}>Enrolled Face Vectors:</span>
+                <span
+                  className="badge"
+                  style={{
+                    backgroundColor: faceData.enrolled_count > 0 ? '#dcfce7' : '#fee2e2',
+                    color: faceData.enrolled_count > 0 ? '#15803d' : '#b91c1c',
+                    fontSize: '0.85rem',
+                  }}
+                >
+                  {faceData.enrolled_count} / 5 Enrolled
+                </span>
+              </div>
+
+              {/* 3. Multi-Photo Upload Section */}
+              {faceData.consent_given ? (
+                <form onSubmit={handleUploadFaces}>
+                  <div className="form-group">
+                    <label className="form-label">Upload Portrait Photos (1 to 5 images)</label>
+                    <input
+                      type="file"
+                      multiple
+                      accept=".jpg,.jpeg,.png"
+                      onChange={handlePhotoSelect}
+                      className="form-input"
+                    />
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.3rem' }}>
+                      Clear, front-facing single-person photos (JPG/PNG, max 10MB each).
+                    </div>
+                  </div>
+
+                  {/* Thumbnail Previews */}
+                  {photoPreviews.length > 0 && (
+                    <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', marginBottom: '1.25rem' }}>
+                      {photoPreviews.map((url, idx) => (
+                        <div
+                          key={idx}
+                          style={{
+                            position: 'relative',
+                            width: '80px',
+                            height: '80px',
+                            borderRadius: 'var(--radius-sm)',
+                            overflow: 'hidden',
+                            border: '1px solid var(--border-color)',
+                          }}
+                        >
+                          <img
+                            src={url}
+                            alt={`Preview ${idx + 1}`}
+                            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => handleRemovePhoto(idx)}
+                            style={{
+                              position: 'absolute',
+                              top: 2,
+                              right: 2,
+                              backgroundColor: 'rgba(0,0,0,0.6)',
+                              color: 'white',
+                              border: 'none',
+                              borderRadius: '50%',
+                              width: '18px',
+                              height: '18px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              cursor: 'pointer',
+                            }}
+                          >
+                            <X size={12} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <button
+                    type="submit"
+                    disabled={uploadingFaces || selectedPhotos.length === 0}
+                    className="btn btn-primary"
+                    style={{ width: '100%', justifyContent: 'center' }}
+                  >
+                    <Upload size={16} />
+                    {uploadingFaces ? 'Detecting & Extracting Vectors...' : `Enroll ${selectedPhotos.length || ''} Selected Face(s)`}
+                  </button>
+                </form>
+              ) : (
+                <div
+                  style={{
+                    textAlign: 'center',
+                    padding: '1.5rem',
+                    background: '#f8fafc',
+                    borderRadius: 'var(--radius-sm)',
+                    color: 'var(--text-secondary)',
+                    fontSize: '0.85rem',
+                  }}
+                >
+                  Please enable <strong>"Consent to store face data"</strong> above to upload portrait photos for recognition.
+                </div>
+              )}
+
+              {/* 4. Delete Action */}
+              {faceData.enrolled_count > 0 && (
+                <div style={{ marginTop: '1.5rem', borderTop: '1px solid var(--border-color)', paddingTop: '1rem' }}>
+                  <button
+                    type="button"
+                    onClick={handleDeleteFaceData}
+                    className="btn btn-danger btn-sm"
+                    style={{ width: '100%', justifyContent: 'center' }}
+                  >
+                    <Trash2 size={15} /> Delete All Face Data for this Student
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <div className="modal-footer">
+              <button
+                type="button"
+                onClick={() => setIsFaceModalOpen(false)}
+                className="btn btn-secondary"
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}
