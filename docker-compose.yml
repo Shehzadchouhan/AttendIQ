@@ -1,0 +1,65 @@
+services:
+  # 1. PostgreSQL Database Service
+  db:
+    image: postgres:15-alpine
+    container_name: facemark_db
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-facemark_db}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-facemark_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # 2. FastAPI Backend Service
+  backend:
+    build: ./backend
+    image: facemark_backend
+    container_name: facemark_backend
+    restart: always
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-facemark_db}
+      - SECRET_KEY=${SECRET_KEY:-supersecretkeyforfacemarkphase1jwtsecurityreplaceinprod!}
+      - ALGORITHM=${ALGORITHM:-HS256}
+      - ACCESS_TOKEN_EXPIRE_MINUTES=${ACCESS_TOKEN_EXPIRE_MINUTES:-1440}
+      - SEED_ADMIN_EMAIL=${SEED_ADMIN_EMAIL:-admin@facemark.local}
+      - SEED_ADMIN_PASSWORD=${SEED_ADMIN_PASSWORD:-admin123}
+      - INITIAL_ADMIN_NAME=${INITIAL_ADMIN_NAME:-System Administrator}
+      - SEED_TEACHER_EMAIL=${SEED_TEACHER_EMAIL:-teacher@facemark.local}
+      - SEED_TEACHER_PASSWORD=${SEED_TEACHER_PASSWORD:-teacher123}
+      - INITIAL_TEACHER_NAME=${INITIAL_TEACHER_NAME:-Prof. Sharma}
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+    # Runs migrations, seeds initial admin & teacher, then launches FastAPI with hot reload
+    command: ["sh", "-c", "alembic upgrade head && python seed.py && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"]
+
+  # 3. React + Vite Frontend Service
+  frontend:
+    build: ./frontend
+    image: facemark_frontend
+    container_name: facemark_frontend
+    restart: always
+    depends_on:
+      - backend
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_BASE_URL=http://localhost:8000/api/v1
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+
+volumes:
+  postgres_data:
