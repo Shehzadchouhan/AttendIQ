@@ -29,40 +29,6 @@ from app.models.student import Student, FaceEmbedding
 from app.models.batch import Batch, Enrollment
 from app.services.face_engine import face_engine
 
-# Setup in-memory SQLite database
-TEST_DATABASE_URL = "sqlite:///:memory:"
-
-engine = create_engine(
-    TEST_DATABASE_URL,
-    connect_args={"check_same_thread": False},
-    poolclass=StaticPool,
-)
-TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-
-def override_get_db():
-    db = TestingSessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
-
-app.dependency_overrides[get_db] = override_get_db
-
-
-@pytest.fixture(scope="function")
-def db_session():
-    Base.metadata.create_all(bind=engine)
-    db = TestingSessionLocal()
-    yield db
-    db.close()
-    Base.metadata.drop_all(bind=engine)
-
-
-@pytest.fixture(scope="function")
-def client():
-    return TestClient(app)
 
 
 def get_auth_headers(user: User) -> dict:
@@ -262,7 +228,7 @@ def test_upload_faces_rejects_oversize_file(client, setup_phase2_data):
     oversize_bytes = b"0" * (11 * 1024 * 1024)  # 11MB
     files = [("photos", ("huge.jpg", oversize_bytes, "image/jpeg"))]
     res = client.post(f"/api/v1/students/{student1.id}/faces", files=files, headers=headers)
-    assert res.status_code == 400
+    assert res.status_code in (400, 413)
     assert "exceeds maximum allowed size" in res.json()["detail"]
 
 

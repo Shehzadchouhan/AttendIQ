@@ -1,0 +1,75 @@
+services:
+  # 1. Production PostgreSQL Database Service
+  db:
+    image: postgres:15-alpine
+    container_name: facemark_prod_db
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-facemark_db}
+    volumes:
+      - postgres_prod_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-facemark_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # 2. Production FastAPI Backend (Non-Root User, 1 Uvicorn Worker)
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    image: facemark_backend:prod
+    container_name: facemark_prod_backend
+    restart: always
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      - ENVIRONMENT=production
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-facemark_db}
+      - SECRET_KEY=${SECRET_KEY}
+      - ALGORITHM=${ALGORITHM:-HS256}
+      - ACCESS_TOKEN_EXPIRE_MINUTES=${ACCESS_TOKEN_EXPIRE_MINUTES:-1440}
+      - SEED_ADMIN_EMAIL=${SEED_ADMIN_EMAIL:-admin@facemark.local}
+      - SEED_ADMIN_PASSWORD=${SEED_ADMIN_PASSWORD:-admin123}
+      - INITIAL_ADMIN_NAME=${INITIAL_ADMIN_NAME:-System Administrator}
+      - SEED_TEACHER_EMAIL=${SEED_TEACHER_EMAIL:-teacher@facemark.local}
+      - SEED_TEACHER_PASSWORD=${SEED_TEACHER_PASSWORD:-teacher123}
+      - INITIAL_TEACHER_NAME=${INITIAL_TEACHER_NAME:-Prof. Sharma}
+      - MODEL_NAME=${MODEL_NAME:-buffalo_l}
+      - DETECTION_SIZE=${DETECTION_SIZE:-640}
+      - RECOGNITION_DET_SIZE=${RECOGNITION_DET_SIZE:-1280}
+      - MATCH_THRESHOLD=${MATCH_THRESHOLD:-0.45}
+      - REVIEW_THRESHOLD=${REVIEW_THRESHOLD:-0.35}
+      - MIN_FACE_WIDTH=${MIN_FACE_WIDTH:-80}
+      - MIN_DET_SCORE=${MIN_DET_SCORE:-0.6}
+      - MAX_UPLOAD_MB=${MAX_UPLOAD_MB:-10}
+      - MAX_IMAGE_MEGAPIXELS=${MAX_IMAGE_MEGAPIXELS:-40}
+      - ATTENDANCE_ALERT_THRESHOLD=${ATTENDANCE_ALERT_THRESHOLD:-75.0}
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost,http://127.0.0.1}
+      - RATE_LIMIT_LOGIN=${RATE_LIMIT_LOGIN:-5/minute}
+    volumes:
+      - insightface_prod_cache:/home/appuser/.insightface
+    ports:
+      - "8000:8000"
+
+  # 3. Production Frontend (Multi-Stage Build served by Nginx)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+    image: facemark_frontend:prod
+    container_name: facemark_prod_frontend
+    restart: always
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "80:80"
+
+volumes:
+  postgres_prod_data:
+  insightface_prod_cache:

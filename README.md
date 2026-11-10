@@ -1,95 +1,75 @@
-# FaceMark — Attendance System (Phase 1 & Phase 2)
+# FaceMark — Attendance System (Phase 1, Phase 2, Phase 3 & Phase 4)
+
+[![FaceMark CI](https://github.com/facemark/facemark/actions/workflows/ci.yml/badge.svg)](https://github.com/facemark/facemark/actions/workflows/ci.yml)
+![Python 3.11](https://img.shields.io/badge/Python-3.11-blue.svg)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-green.svg)
+![React 18](https://img.shields.io/badge/React-18.2-cyan.svg)
+![Docker Compose](https://img.shields.io/badge/Docker-Production%20Ready-blue.svg)
+![Coverage](https://img.shields.io/badge/Coverage-%E2%89%A570%25-brightgreen.svg)
 
 FaceMark is a modern, privacy-first face-recognition attendance and student management system designed for tuition centers and coaching institutes.
 
 * **Phase 1: Core System Architecture & Management Infrastructure**: Normalized PostgreSQL schema (7 tables), synchronous SQLAlchemy 2.x ORM, Alembic migrations, JWT authentication with Role-Based Access Control (Admin and Teacher), CRUD APIs, and React UI.
 * **Phase 2: Face Enrollment & Recognition Engine**: Zero-disk-storage biometric pipeline powered by InsightFace (`buffalo_l`), L2-normalized 512-dimensional embeddings, vector cosine similarity matching via NumPy dot products, student consent enforcement ("Consent to store face data"), batch-level RBAC for teachers, and precision/recall evaluation tooling.
+* **Phase 3: Attendance Review Flow & Reports**: Interactive attendance workflow with canvas bounding box overlays (Green=matched, Amber=review, Red=unknown), manual override roster, assignment of unknown faces, session creation with duplicate date protection (`UNIQUE(batch_id, session_date)`), confirmed status persistence, Recharts visual analytics, low-attendance alerts ($< 75\%$), and CSV report export.
+* **Phase 4: Quality, DevOps & Security Hardening**: Comprehensive test suite with $\ge 70\%$ backend coverage (`pytest-cov`), frontend Vitest smoke testing and ESLint enforcement, multi-stage production Docker setup served by Nginx with security headers, non-root user execution, single-worker memory optimization for InsightFace, SlowAPI rate limiting on authentication, GitHub Actions CI/CD to GitHub Container Registry (GHCR), and complete cloud VM deployment guide (`DEPLOYMENT.md`).
 
 ---
 
-## 1. System Architecture & Biometric Pipeline
+## 1. System Architecture & Attendance Workflow
 
 ```mermaid
 flowchart TD
-    subgraph Client [Frontend UI - React + Vite (Port 5173)]
-        AdminView["Admin Dashboard & Batches"]
-        TeacherView["Teacher Dashboard & My Batches"]
-        EnrollModal["Face Enrollment Modal<br/>(Consent Checkbox + 1-5 Photo Upload)"]
+    subgraph Client ["Client Browser"]
+        SPA["React 18 SPA (Vite)<br/>Interactive HTML Canvas<br/>Recharts Visual Analytics"]
     end
 
-    subgraph Backend [FastAPI Backend (Port 8000)]
-        Auth["JWT & RBAC Middleware<br/>(Admin & Teacher Scopes)"]
-        FaceEngine["FaceEngine Singleton<br/>(InsightFace FaceAnalysis - buffalo_l)"]
-        BatchService["Batch & Attendance Service"]
+    subgraph Ingress ["Ingress & Web Server (Port 80)"]
+        Nginx["Nginx Multi-Stage Container<br/>- Static Assets Caching & Gzip<br/>- Security Headers (X-Frame, CSP, Referrer)<br/>- Reverse Proxy /api/ to Backend"]
     end
 
-    subgraph Biometrics [In-Memory Biometric Processing]
+    subgraph AppServer ["FastAPI Application Server (Port 8000)"]
+        RateLimit["SlowAPI Rate Limiter<br/>(5 req/min on /auth/login)"]
+        AuthMiddleware["JWT & RBAC Middleware<br/>(Admin & Teacher Scopes)"]
+        FastAPI["FastAPI (Non-Root 'appuser')<br/>1 Uvicorn Worker (RAM Optimized)"]
+    end
+
+    subgraph Biometrics ["In-Memory Biometric Pipeline"]
+        InsightFace["InsightFace FaceAnalysis Singleton<br/>(buffalo_l / buffalo_s on CPU)"]
         RAM["RAM Buffer (Zero Disk Writes)"]
-        Crop["Face Detection & BBox Extraction"]
         Embed["512-d L2-Normalized Embedding Extraction"]
-        Cosine["Cosine Similarity Matching: dot(u, v)"]
+        Cosine["Cosine Similarity: max(dot(u, v))"]
     end
 
-    subgraph Data [PostgreSQL 15 (Port 5432) & Cache]
-        Postgres[("PostgreSQL DB<br/>(Students, Users, Batches,<br/>FaceEmbeddings JSON, Attendance)")]
-        ModelVol[("Docker Volume: insightface_models<br/>(/root/.insightface)")]
+    subgraph Data ["Database Tier (Port 5432)"]
+        PostgreSQL[("PostgreSQL 15 (Docker Volume)<br/>- pg_isready Healthcheck<br/>- Alembic Versioned Migrations<br/>- Attendance & Face Vector Tables")]
     end
 
-    Client -->|"HTTP Multipart / JSON (Bearer JWT)"| Auth
-    Auth --> FaceEngine
-    FaceEngine --> RAM
-    RAM --> Crop
-    Crop --> Embed
-    Embed --> Cosine
-    Cosine --> BatchService
-    BatchService --> Postgres
-    FaceEngine -.->|"Caches ONNX weights"| ModelVol
+    Client -->|HTTP Port 80| Nginx
+    Nginx -->|Proxy API| RateLimit
+    RateLimit --> AuthMiddleware --> FastAPI
+    FastAPI -->|Inference Query| InsightFace
+    InsightFace --> RAM --> Embed --> Cosine
+    FastAPI -->|Synchronous SQLAlchemy 2.0| PostgreSQL
 ```
-
-### Zero-Disk Biometric Privacy Architecture
-1. **Never Storing Raw Photos**: Portrait photos uploaded during enrollment and group classroom photos uploaded during attendance recognition exist **strictly in RAM** as ephemeral byte buffers during inference. They are never written to disk or the database.
-2. **Embedding Storage**: Only mathematical 512-dimensional feature vectors (`list[float]`) are serialized as JSON in `face_embeddings.embedding_data`. A face cannot be reconstructed from an embedding vector.
-3. **Explicit Consent**: Face enrollment requires `consent_given = true`. Revoking consent immediately triggers a hard cascade delete of all stored biometric embeddings for that student.
 
 ---
 
-## 2. Cosine Similarity & Vector Matching Mathematics
+## 2. Attendance Canvas Bounding Box Color Codes
 
-The face recognition engine uses **L2-normalized feature vectors** generated by InsightFace.
+When a group classroom photo is analyzed during attendance capture:
+1. 🟢 **Green Box** (`matched` &ge; 0.45): High-confidence biometric match. Displays student full name, roll number, and match percentage (e.g. `Aarav Patel (92%)`). Automatically pre-fills student as **Present** in the roster.
+2. 🟠 **Amber Box** (`review` 0.35 &ndash; 0.45): Potential match flagged for teacher confirmation. Displays candidate name and match percentage.
+3. 🔴 **Red Box** (`unknown` &lt; 0.35): Unidentified person or visitor. Can be assigned to any absent enrolled student via the dropdown in the side review panel.
 
-### Mathematical Formulation
-For two 512-dimensional embedding vectors $\mathbf{u}$ and $\mathbf{v}$:
-
-$$\text{Cosine Similarity} = \frac{\mathbf{u} \cdot \mathbf{v}}{\|\mathbf{u}\|_2 \|\mathbf{v}\|_2}$$
-
-Because InsightFace extracts unit-normalized vectors ($\|\mathbf{u}\|_2 = 1.0$ and $\|\mathbf{v}\|_2 = 1.0$), the denominator equals $1.0$. The cosine similarity simplifies to a single NumPy dot product:
-
-$$\text{Similarity}(\mathbf{u}, \mathbf{v}) = \mathbf{u} \cdot \mathbf{v} = \sum_{i=1}^{512} u_i \cdot v_i$$
-
-```python
-# From app/services/face_engine.py
-def compute_cosine_similarity(emb1: np.ndarray, emb2: np.ndarray) -> float:
-    # Dot product of two normalized unit vectors equals cosine similarity
-    dot_product = float(np.dot(emb1, emb2))
-    # Clamp to [-1.0, 1.0] to guard against minor floating point errors
-    return max(-1.0, min(1.0, dot_product))
-```
-
-### Multi-Embedding Comparison & One-to-One Matching
-1. **Multi-Embedding Comparison**: A student can have 1 to 5 enrolled reference photos. During recognition, each detected face in the classroom photo is compared against **all** enrolled embeddings of that student; the maximum similarity score is taken:
-   $$\text{Score}(\text{Face}_j, \text{Student}_k) = \max_{e \in \text{Embeddings}_k} (\mathbf{u}_j \cdot \mathbf{v}_{k, e})$$
-2. **Decision Thresholds**:
-   * **`matched`** ($\ge 0.45$): High-confidence identification.
-   * **`review`** ($0.35 \le \text{score} < 0.45$): Ambiguous or partial match flagged for teacher manual review.
-   * **`unknown`** ($< 0.35$): Unrecognized person or visitor.
-3. **One-Student-One-Face Rule**: Greedy assignment matches the highest global similarity score first, ensuring no student is marked present twice from different faces in the same photograph.
-4. **Absentee Computation**: Students enrolled in the batch whose embeddings were not matched to any face in the photograph are automatically returned in `absent_student_ids`.
+> [!IMPORTANT]
+> **Privacy Guarantee**: The classroom photograph exists solely in browser memory (`URL.createObjectURL`) and ephemeral backend RAM during inference. Photos are never stored on disk or in the database.
 
 ---
 
-## 3. Database Schema (Normalized with Integer PKs)
+## 3. Database Schema & Alembic Migrations
 
-All primary keys use auto-incrementing **Integers** (no UUIDs).
+All tables use auto-incrementing **Integer** primary keys.
 
 ```text
 users (id, email, hashed_password, full_name, role, is_active, created_at)
@@ -98,175 +78,112 @@ users (id, email, hashed_password, full_name, role, is_active, created_at)
   │    │
   │    ├─ enrollments (id, student_id -> students.id, batch_id -> batches.id, enrolled_at)
   │    │
-  │    └─ attendance_sessions (id, batch_id -> batches.id, taken_by_user_id -> users.id, session_date, status, created_at)
+  │    └─ attendance_sessions (id, batch_id, taken_by_user_id, session_date, status, unrecognized_count, created_at)
+  │         │   └─ UNIQUE(batch_id, session_date) [Migration 0004]
   │         │
-  │         └─ attendance_records (id, session_id, student_id -> students.id, status, confidence_score, marked_at)
+  │         └─ attendance_records (id, session_id, student_id, status, method, is_confirmed, confidence_score, marked_at)
+  │              └─ UNIQUE(session_id, student_id)
   │
 students (id, roll_number, full_name, email, phone, is_active, consent_given, consent_at, created_at)
   │
-  └─ face_embeddings (id, student_id -> students.id ON DELETE CASCADE, embedding_data JSON, created_at)
+  └─ face_embeddings (id, student_id ON DELETE CASCADE, embedding_data JSON, created_at)
 ```
 
-### Alembic Migrations
-* `0001_initial_schema`: Base tables (`users`, `students`, `batches`, `enrollments`, `face_embeddings`, `attendance_sessions`, `attendance_records`).
-* `0002_batch_teacher_attendance`: Foreign key `batches.teacher_id -> users.id`, `attendance_records.confidence_score`.
-* `0003_student_face_consent`: `students.consent_given` (Boolean, default False) and `students.consent_at` (DateTime, nullable).
+### Alembic Migration History
+1. `0001_initial_schema`: Initial normalized schema (7 tables).
+2. `0002_batch_teacher_attendance`: Added `batches.teacher_id`, `attendance_records.method`, `attendance_records.is_confirmed`, and `attendance_sessions.unrecognized_count`.
+3. `0003_student_face_consent`: Added `students.consent_given` (Boolean, default False) and `students.consent_at`.
+4. `0004_session_batch_date_unique`: Added `UniqueConstraint('batch_id', 'session_date', name='uq_batch_date')` to `attendance_sessions` ensuring one session per batch per date.
 
 ---
 
-## 4. API Reference (Phase 2 Endpoints)
+## 4. Phase 3 API Reference
 
 All endpoints require JWT Bearer authentication.
 
-### Face Biometric Endpoints (`/api/v1/students`)
+### Attendance Session Endpoints (`/api/v1/attendance`)
 | Method | Endpoint | Access | Description |
 | :--- | :--- | :--- | :--- |
-| `PATCH` | `/api/v1/students/{id}/consent` | Admin / Assigned Teacher | Update consent (`{"consent_given": bool}`). Revoking consent cascades and deletes all face embeddings. |
-| `POST` | `/api/v1/students/{id}/faces` | Admin / Assigned Teacher | Upload 1 to 5 portrait photos (`multipart/form-data`). Strict validation: JPG/PNG, $\le 10$MB, $\le 40$MP, exactly 1 face $\ge 80$px width, det score $\ge 0.60$. |
-| `GET` | `/api/v1/students/{id}/faces` | Admin / Assigned Teacher | Get enrolled count and consent metadata. |
-| `DELETE`| `/api/v1/students/{id}/faces` | Admin / Assigned Teacher | Delete all enrolled embeddings for student. |
+| `POST` | `/attendance/recognize` | Teacher (Own) / Admin | Analyzes group photo; returns upright dimensions, bounding boxes, statuses, confidence scores, and absent student IDs. |
+| `POST` | `/attendance/sessions` | Teacher (Own) / Admin | Creates session (`batch_id`, `session_date`). Strictly enforces unique session per batch per date (HTTP 409 if duplicate). |
+| `POST` | `/attendance/sessions/{id}/confirm` | Teacher (Own) / Admin | Confirms attendance records (`student_id`, `status: present/absent/late`, `method: face/manual`, `confidence_score`). Sets `is_confirmed=true`, updates `unrecognized_count`, and marks `status='completed'`. Rejects duplicate students in payload (HTTP 400). |
+| `GET` | `/attendance/sessions` | Teacher (Own) / Admin | Lists attendance sessions with counts, filterable by `batch_id`, `from_date`, and `to_date`. |
+| `GET` | `/attendance/sessions/{id}` | Teacher (Own) / Admin | Retrieves session details and student attendance records. |
 
-### Attendance Recognition Endpoint (`/api/v1/attendance`)
+### Reports & Analytics Endpoints (`/api/v1/reports`)
 | Method | Endpoint | Access | Description |
 | :--- | :--- | :--- | :--- |
-| `POST` | `/api/v1/attendance/recognize` | Admin / Batch Teacher | Upload group class photo + `batch_id`. Returns image dimensions, detected faces with bounding boxes, match confidence scores, and list of absent student IDs. |
-
-#### Sample Recognition Response:
-```json
-{
-  "batch_id": 1,
-  "image_width": 1920,
-  "image_height": 1080,
-  "total_faces_detected": 3,
-  "matched_count": 2,
-  "review_count": 1,
-  "unknown_count": 0,
-  "faces": [
-    {
-      "bbox": [210, 150, 360, 340],
-      "det_score": 0.985,
-      "student_id": 1,
-      "student_name": "Aarav Patel",
-      "roll_number": "STU-101",
-      "score": 0.742,
-      "status": "matched"
-    },
-    {
-      "bbox": [650, 140, 810, 350],
-      "det_score": 0.961,
-      "student_id": 2,
-      "student_name": "Diya Sharma",
-      "roll_number": "STU-102",
-      "score": 0.412,
-      "status": "review"
-    }
-  ],
-  "absent_student_ids": [3]
-}
-```
+| `GET` | `/reports/student/{id}` | Teacher (Enrolled) / Admin | Returns student attendance % overall and per-batch breakdown. Flags `is_low_attendance=true` if &lt; 75%. |
+| `GET` | `/reports/batch/{id}?from=&to=` | Teacher (Own) / Admin | Computes per-student counts and %, identifies low-attendance students, and generates daily trend timeline for Recharts. |
+| `GET` | `/reports/batch/{id}/export` | Teacher (Own) / Admin | Downloads CSV file of batch attendance report (`text/csv`). |
+| `GET` | `/reports/dashboard` | All Authenticated | Provides today's attendance summary (sessions, present, absent, rate) and low-attendance students across active batches. |
 
 ---
 
-## 5. Quickstart & Deployment with Docker Compose
+## 5. Attendance Calculation & Alert Threshold
 
-### Prerequisites
-* Docker & Docker Compose installed.
+* **Attendance Percentage Formula**:
+  $$\text{Attendance Rate (\%)} = \left( \frac{\text{Present Count} + \text{Late Count}}{\text{Total Sessions}} \right) \times 100$$
+* **Low-Attendance Alert Threshold**:
+  Configured via `ATTENDANCE_ALERT_THRESHOLD=75.0` (default 75%).
+  Any student with attendance rate strictly below 75% is automatically flagged with `is_low_attendance: true` and surfaced in the Dashboard and Reports warning widgets.
 
-### Start the Services
+---
+
+## 6. Running the Application & Tests
+
+### Start Services in Development Mode
 ```bash
-# 1. Clone/navigate to facemark directory
 cd facemark
-
-# 2. Build and start containers fresh
 docker compose up --build
 ```
 
-### What Happens Automatically
-1. PostgreSQL container boots and initializes health checks.
-2. Backend container installs InsightFace dependencies (`build-essential`, `libgl1`, `onnxruntime`, `insightface`).
-3. Runs Alembic migrations up to head (`0003_student_face_consent`).
-4. Seeds default admin (`admin@facemark.local` / `admin123`) and teacher (`teacher@facemark.local` / `teacher123`).
-5. Warms up the InsightFace model (`buffalo_l`) at startup and caches weights in the persistent Docker volume `insightface_models`.
-6. Frontend launches Vite on `http://localhost:5173`.
-
-### Access Points
-* **Frontend Web Application**: [http://localhost:5173](http://localhost:5173)
-* **Interactive OpenAPI Docs (Swagger)**: [http://localhost:8000/docs](http://localhost:8000/docs)
-* **Alternative API Docs (ReDoc)**: [http://localhost:8000/redoc](http://localhost:8000/redoc)
-
----
-
-## 6. Offline Accuracy Evaluation Tool
-
-An accuracy evaluation script is provided in `backend/scripts/evaluate_accuracy.py` for testing precision, recall, and F1-score across similarity threshold sweeps.
-
-### Directory Structure Expected
-```text
-dataset/
-├── enroll/
-│   ├── 1/                     # Student ID folder
-│   │   ├── photo1.jpg
-│   │   └── photo2.jpg
-│   └── 2/
-│       ├── photo1.jpg
-│       └── photo2.jpg
-└── test/
-    ├── class_photo_1.jpg
-    ├── class_photo_2.jpg
-    └── ground_truth.csv       # Header: photo,student_id
+### Start Services in Hardened Production Mode
+```bash
+cd facemark
+docker compose -f docker-compose.prod.yml up -d --build
 ```
 
-### Running the Evaluation
+### Run All Backend Tests with Coverage (>= 70%)
+In a separate terminal:
 ```bash
-# Inside backend container or locally with dependencies installed:
-python scripts/evaluate_accuracy.py --enroll-dir path/to/enroll --test-dir path/to/test --output report.md
-```
+# Run full test suite with coverage report (fails if under 70%):
+docker compose exec backend pytest --cov=app --cov-report=term-missing --cov-fail-under=70 -v
 
-### Output Metrics Table
-The script sweeps similarity thresholds from 0.30 to 0.70 and outputs a markdown/ASCII table:
-
-| Threshold | Precision | Recall | F1-Score | True Positives | False Positives | False Negatives |
-| :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| 0.35 | 88.5% | 94.2% | 0.912 | 49 | 6 | 3 |
-| **0.45** | **96.1%** | **92.3%** | **0.941** | **48** | **2** | **4** |
-| 0.55 | 98.0% | 84.6% | 0.908 | 44 | 1 | 8 |
-
----
-
-## 7. Running Tests
-
-Run the complete Pytest test suite inside the backend container:
-
-```bash
-# Face enrollment, consent, validation, and attendance recognition tests:
+# Run individual test suites:
+docker compose exec backend pytest tests/test_auth_and_users.py -v
+docker compose exec backend pytest tests/test_students_crud_and_security.py -v
+docker compose exec backend pytest tests/test_attendance_and_reports.py -v
 docker compose exec backend pytest tests/test_face_engine_endpoints.py -v
-
-# Batch management and RBAC tests:
 docker compose exec backend pytest tests/test_batches_rbac.py -v
 ```
 
+### Run Frontend Linting & Smoke Tests
+```bash
+# Run ESLint check
+docker compose exec frontend npm run lint
+
+# Run Vitest smoke tests
+docker compose exec frontend npm test
+```
+
 ---
 
-## 8. Academic Viva Q&A Guide
+## 7. Academic Viva / Presentation Q&A (Phase 4)
 
-Here are explanations of key architectural and mathematical choices frequently asked by examiners:
+### Q1: Why must the production backend run with only ONE Uvicorn worker?
+* The biometric recognition engine (`InsightFace` / `ONNX Runtime`) loads multiple deep convolutional neural network weights (RetinaFace for detection, ArcFace for 512-d feature extraction).
+* Each Uvicorn worker operates in an isolated OS process. If Uvicorn runs with 4 workers (`--workers 4`), the entire model (~350MB weights + ~1.2GB runtime memory) is loaded 4 times independently, consuming over 5 GB of RAM.
+* Restricting production to **1 Uvicorn worker** (`--workers 1`) bounds memory consumption strictly to ~1.5 GB RAM, allowing the system to run reliably on single-node budget cloud VMs without triggering OOM (Out-Of-Memory) killer terminations.
 
-### Q1: Why use Cosine Similarity instead of Euclidean Distance?
-* **High-dimensional spaces**: In 512 dimensions, Euclidean distance is sensitive to vector magnitude variations caused by lighting and illumination shifts.
-* **Angular orientation**: Cosine similarity measures the angle between vectors rather than Euclidean distance, isolating biometric facial landmark relationships from exposure differences.
-* **Computational efficiency**: Because the embeddings are L2-normalized ($L_2\text{-norm} = 1.0$), cosine similarity reduces to a dot product ($\sum u_i \cdot v_i$), which executes via vectorized BLAS instructions in NumPy.
+### Q2: Why run containerized services as a non-root user (`appuser`)?
+* By default, Docker containers run processes as root (UID 0). If a vulnerability exists in any dependency (e.g. image processing or file parsing libraries), an attacker exploiting remote code execution gains root privileges inside the container, increasing the risk of container escape and host kernel exploitation.
+* Creating and switching to a dedicated non-root user (`USER appuser`) ensures the principle of least privilege, preventing unauthorized system configuration changes and file tampering.
 
-### Q2: Why is the model loaded at startup rather than lazily on the first request?
-* Loading an ONNX model into memory and warming up the CPU inference session takes between 2 to 5 seconds.
-* Lazy loading introduces a major latency spike (HTTP request timeout risk) for the first user uploading an image.
-* Loading during the FastAPI `@app.on_event("startup")` lifecycle ensures the model is primed and subsequent API requests execute with low, predictable latency ($\sim 100\text{–}300$ ms).
+### Q3: Why is rate limiting placed specifically on `/api/v1/auth/login`?
+* Authentication endpoints are the primary target for credential stuffing, dictionary attacks, and automated brute-force attempts.
+* SlowAPI rate limits `/api/v1/auth/login` to `5 requests/minute` per client IP. This denies automated password guessing while having zero impact on regular school staff and teachers.
 
-### Q3: How is student privacy protected without storing photos?
-* Photos exist solely in RAM during the lifecycle of the HTTP request. Once `face_engine.get_faces()` extracts the bounding box and embedding vector, the raw byte array is discarded and garbage collected.
-* Only the 512-dimensional numerical vector is stored in the PostgreSQL database.
-* An embedding vector is a one-way mathematical abstraction; it is computationally impossible to reconstruct the student's original face photo from the vector.
-* Furthermore, if consent is revoked, all embeddings are immediately purged from the database.
-
-### Q4: How does the system handle multi-face classroom photos?
-* The classroom recognition endpoint uses `RECOGNITION_DET_SIZE = 1280` (higher resolution than the 640px enrollment size) to reliably detect smaller faces in wider group photos.
-* A greedy one-to-one matching algorithm assigns detected faces to enrolled students based on maximum similarity, ensuring a student cannot be recognized in two different bounding boxes simultaneously.
+### Q4: When and why should an administrator switch to `MODEL_NAME=buffalo_s`?
+* `buffalo_s` is a lightweight, mobile-optimized InsightFace model (~85 MB) designed for resource-constrained environments.
+* When hosting FaceMark on budget cloud servers with 1GB to 2GB RAM (e.g. \$4&ndash;\$6/mo VMs), setting `MODEL_NAME=buffalo_s` reduces inference RAM by ~65% (~500MB total), ensuring snappy attendance recognition without requiring expensive multi-gigabyte cloud instances.

@@ -27,6 +27,11 @@ class AttendanceSession(Base):
     unrecognized_count = Column(Integer, default=0, server_default="0", nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
+    # Unique constraint ensuring exactly one session per batch per date
+    __table_args__ = (
+        UniqueConstraint("batch_id", "session_date", name="uq_batch_date"),
+    )
+
     # Relationships
     batch = relationship("Batch", back_populates="attendance_sessions")
     taken_by_user = relationship("User", back_populates="attendance_sessions")

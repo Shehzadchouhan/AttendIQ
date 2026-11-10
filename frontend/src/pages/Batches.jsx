@@ -1,10 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, BookOpen, Users, Edit2, Trash2, X, AlertCircle, UserPlus, UserMinus, UserCheck } from 'lucide-react';
+import { Plus, BookOpen, Users, Edit2, Trash2, X, AlertCircle, UserPlus, UserMinus, UserCheck, Calendar } from 'lucide-react';
 import apiClient from '../api/client';
 import { useAuth } from '../context/AuthContext';
+import { useToast } from '../context/ToastContext';
+import SessionHistoryModal from '../components/SessionHistoryModal';
 
 const Batches = () => {
   const { user, isAdmin } = useAuth();
+  const { toast } = useToast();
   const [batches, setBatches] = useState([]);
   const [teachersList, setTeachersList] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -29,10 +32,23 @@ const Batches = () => {
   const [enrollError, setEnrollError] = useState('');
   const [enrollSuccess, setEnrollSuccess] = useState('');
 
+  // Scope filter: 'all' to show all 5 coaching batches, 'my' to show teacher-assigned batches
+  const [filterScope, setFilterScope] = useState('all');
+
+  // Session History Modal
+  const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
+  const [historyBatch, setHistoryBatch] = useState(null);
+
+  const handleOpenHistoryModal = (batch) => {
+    setHistoryBatch(batch);
+    setIsHistoryModalOpen(true);
+  };
+
   const fetchBatches = async () => {
     try {
       setLoading(true);
-      const res = await apiClient.get('/batches/');
+      const url = filterScope === 'my' && !isAdmin ? '/batches/' : '/batches/?scope=all';
+      const res = await apiClient.get(url);
       setBatches(res.data);
     } catch (err) {
       console.error('Failed to load batches', err);
@@ -55,7 +71,7 @@ const Batches = () => {
     if (isAdmin) {
       fetchTeachers();
     }
-  }, [isAdmin]);
+  }, [isAdmin, filterScope]);
 
   const handleOpenAddBatch = () => {
     setEditingBatch(null);
@@ -98,28 +114,34 @@ const Batches = () => {
     try {
       if (editingBatch) {
         await apiClient.put(`/batches/${editingBatch.id}`, payload);
+        toast.success(`Batch "${payload.name}" updated successfully.`);
       } else {
         await apiClient.post('/batches/', payload);
+        toast.success(`Batch "${payload.name}" created successfully.`);
       }
       setIsBatchModalOpen(false);
       fetchBatches();
     } catch (err) {
-      setBatchFormError(err.response?.data?.detail || 'Failed to save batch');
+      const errMsg = err.response?.data?.detail || 'Failed to save batch';
+      setBatchFormError(errMsg);
+      toast.error(errMsg);
     }
   };
 
   const handleDeleteBatch = async (batchId, batchName) => {
     if (!isAdmin) {
-      alert('Only Administrators can delete batches.');
+      toast.warning('Only Administrators can delete batches.');
       return;
     }
 
     if (window.confirm(`Are you sure you want to delete batch "${batchName}"? This will cascade remove enrollments and attendance sessions.`)) {
       try {
         await apiClient.delete(`/batches/${batchId}`);
+        toast.success(`Batch "${batchName}" deleted.`);
         fetchBatches();
       } catch (err) {
-        alert(err.response?.data?.detail || 'Failed to delete batch');
+        const errMsg = err.response?.data?.detail || 'Failed to delete batch';
+        toast.error(errMsg);
       }
     }
   };
@@ -134,21 +156,35 @@ const Batches = () => {
     try {
       const [detailRes, studentsRes] = await Promise.all([
         apiClient.get(`/batches/${batch.id}`),
-        apiClient.get('/students/?limit=300'),
+        apiClient.get('/students/?limit=500'),
       ]);
       setBatchDetails(detailRes.data);
       setAllStudents(studentsRes.data);
-      if (studentsRes.data.length > 0) {
-        setSelectedStudentToEnroll(studentsRes.data[0].id.toString());
+
+      const enrolledIds = new Set(
+        (detailRes.data.enrolled_students || []).map((s) => s.id)
+      );
+      const available = (studentsRes.data || []).filter(
+        (s) => !enrolledIds.has(s.id)
+      );
+
+      if (available.length > 0) {
+        setSelectedStudentToEnroll(available[0].id.toString());
+      } else {
+        setSelectedStudentToEnroll('');
       }
     } catch (err) {
       console.error('Error fetching batch details for enrollment', err);
+      setEnrollError(err.response?.data?.detail || 'Failed to load batch enrollments.');
     }
   };
 
   const handleEnrollStudent = async (e) => {
     e.preventDefault();
-    if (!selectedStudentToEnroll) return;
+    if (!selectedStudentToEnroll) {
+      setEnrollError('Please select a student to enroll.');
+      return;
+    }
     setEnrollError('');
     setEnrollSuccess('');
 
@@ -157,8 +193,23 @@ const Batches = () => {
         student_id: parseInt(selectedStudentToEnroll),
       });
       setEnrollSuccess('Student enrolled successfully!');
+
       const detailRes = await apiClient.get(`/batches/${selectedBatch.id}`);
       setBatchDetails(detailRes.data);
+
+      const enrolledIds = new Set(
+        (detailRes.data.enrolled_students || []).map((s) => s.id)
+      );
+      const remainingAvailable = allStudents.filter(
+        (s) => !enrolledIds.has(s.id)
+      );
+
+      if (remainingAvailable.length > 0) {
+        setSelectedStudentToEnroll(remainingAvailable[0].id.toString());
+      } else {
+        setSelectedStudentToEnroll('');
+      }
+
       fetchBatches();
     } catch (err) {
       setEnrollError(err.response?.data?.detail || 'Failed to enroll student');
@@ -172,8 +223,11 @@ const Batches = () => {
     try {
       await apiClient.delete(`/batches/${selectedBatch.id}/enroll/${studentId}`);
       setEnrollSuccess('Student removed from batch.');
+
       const detailRes = await apiClient.get(`/batches/${selectedBatch.id}`);
       setBatchDetails(detailRes.data);
+
+      setSelectedStudentToEnroll((prev) => prev || studentId.toString());
       fetchBatches();
     } catch (err) {
       setEnrollError(err.response?.data?.detail || 'Failed to remove student from batch');
@@ -189,13 +243,33 @@ const Batches = () => {
           <p className="page-subtitle">
             {isAdmin
               ? 'Organize classes, assign teachers, and manage enrollments'
-              : `Batches assigned to ${user?.name || 'you'}`}
+              : 'View all coaching batches and manage enrollments in your assigned classes'}
           </p>
         </div>
         <button onClick={handleOpenAddBatch} className="btn btn-primary">
           <Plus size={18} /> Create New Batch
         </button>
       </div>
+
+      {/* Teacher View Scope Filter */}
+      {!isAdmin && (
+        <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.25rem', flexWrap: 'wrap' }}>
+          <button
+            type="button"
+            className={`btn btn-sm ${filterScope === 'all' ? 'btn-primary' : 'btn-secondary'}`}
+            onClick={() => setFilterScope('all')}
+          >
+            All Coaching Batches
+          </button>
+          <button
+            type="button"
+            className={`btn btn-sm ${filterScope === 'my' ? 'btn-primary' : 'btn-secondary'}`}
+            onClick={() => setFilterScope('my')}
+          >
+            My Assigned Batches
+          </button>
+        </div>
+      )}
 
       {/* Batches Table */}
       <div className="table-container">
@@ -237,8 +311,13 @@ const Batches = () => {
                   </td>
                   <td>
                     {batch.teacher_name ? (
-                      <span style={{ fontWeight: 500, display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
+                      <span style={{ fontWeight: 500, display: 'inline-flex', alignItems: 'center', gap: '0.35rem', flexWrap: 'wrap' }}>
                         <UserCheck size={14} color="var(--primary)" /> {batch.teacher_name}
+                        {user?.name && batch.teacher_name.toLowerCase().includes(user.name.toLowerCase().split(' ').pop()) && (
+                          <span className="badge" style={{ backgroundColor: '#dcfce7', color: '#15803d', fontSize: '0.72rem', padding: '0.1rem 0.45rem' }}>
+                            Your Batch
+                          </span>
+                        )}
                       </span>
                     ) : (
                       <span style={{ color: 'var(--text-muted)' }}>Unassigned</span>
@@ -255,7 +334,15 @@ const Batches = () => {
                     </button>
                   </td>
                   <td style={{ textAlign: 'right' }}>
-                    <div style={{ display: 'inline-flex', gap: '0.4rem' }}>
+                    <div style={{ display: 'inline-flex', gap: '0.4rem', alignItems: 'center' }}>
+                      <button
+                        onClick={() => handleOpenHistoryModal(batch)}
+                        className="btn btn-secondary btn-sm"
+                        style={{ gap: '0.35rem', padding: '0.35rem 0.65rem' }}
+                        title="Inspect past attendance dates, face vs manual verification, unrecognized faces"
+                      >
+                        <Calendar size={14} /> History
+                      </button>
                       <button
                         onClick={() => handleOpenEditBatch(batch)}
                         className="btn btn-secondary btn-icon"
@@ -390,8 +477,15 @@ const Batches = () => {
       )}
 
       {/* Manage Enrollees Modal */}
-      {isEnrollModalOpen && (
-        <div className="modal-content-wrapper">
+      {isEnrollModalOpen && (() => {
+        const enrolledIds = new Set(
+          (batchDetails?.enrolled_students || []).map((s) => s.id)
+        );
+        const availableStudents = allStudents.filter(
+          (s) => !enrolledIds.has(s.id)
+        );
+
+        return (
           <div className="modal-overlay">
             <div className="modal-content" style={{ maxWidth: '640px' }}>
               <div className="modal-header">
@@ -441,23 +535,39 @@ const Batches = () => {
                 )}
 
                 {/* Enroll Form */}
-                <form onSubmit={handleEnrollStudent} style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.5rem' }}>
-                  <select
-                    className="form-select"
-                    value={selectedStudentToEnroll}
-                    onChange={(e) => setSelectedStudentToEnroll(e.target.value)}
-                    style={{ flexGrow: 1 }}
+                {availableStudents.length === 0 ? (
+                  <div
+                    style={{
+                      padding: '0.75rem 1rem',
+                      backgroundColor: '#f8fafc',
+                      border: '1px solid var(--border-color)',
+                      borderRadius: 'var(--radius-sm)',
+                      fontSize: '0.85rem',
+                      color: 'var(--text-secondary)',
+                      marginBottom: '1.5rem',
+                    }}
                   >
-                    {allStudents.map((stu) => (
-                      <option key={stu.id} value={stu.id}>
-                        {stu.roll_number} - {stu.full_name}
-                      </option>
-                    ))}
-                  </select>
-                  <button type="submit" className="btn btn-primary" style={{ whiteSpace: 'nowrap' }}>
-                    <UserPlus size={16} /> Enroll
-                  </button>
-                </form>
+                    All registered students are currently enrolled in this batch.
+                  </div>
+                ) : (
+                  <form onSubmit={handleEnrollStudent} style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.5rem' }}>
+                    <select
+                      className="form-select select-input"
+                      value={selectedStudentToEnroll}
+                      onChange={(e) => setSelectedStudentToEnroll(e.target.value)}
+                      style={{ flexGrow: 1 }}
+                    >
+                      {availableStudents.map((stu) => (
+                        <option key={stu.id} value={stu.id}>
+                          {stu.roll_number} - {stu.full_name}
+                        </option>
+                      ))}
+                    </select>
+                    <button type="submit" className="btn btn-primary" style={{ whiteSpace: 'nowrap' }}>
+                      <UserPlus size={16} /> Enroll Student
+                    </button>
+                  </form>
+                )}
 
                 {/* Enrolled Students List */}
                 <h4 style={{ fontSize: '0.9rem', fontWeight: 700, marginBottom: '0.75rem' }}>
@@ -505,8 +615,18 @@ const Batches = () => {
               </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
+
+      {/* Past Attendance History & Session Inspector Modal */}
+      <SessionHistoryModal
+        isOpen={isHistoryModalOpen}
+        onClose={() => {
+          setIsHistoryModalOpen(false);
+          setHistoryBatch(null);
+        }}
+        batch={historyBatch}
+      />
     </div>
   );
 };

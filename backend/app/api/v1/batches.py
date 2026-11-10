@@ -1,5 +1,5 @@
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
@@ -39,16 +39,17 @@ def list_teachers(
 
 @router.get("/", response_model=List[BatchResponse], summary="List Batches")
 def list_batches(
+    scope: Optional[str] = Query(None, description="Set 'all' to list all batches; defaults to role-filtered batches"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """
     Retrieve batches:
     - Admins see all batches.
-    - Teachers only see batches where teacher_id equals their user ID.
+    - Teachers only see batches where teacher_id equals their user ID by default, or all if scope='all'.
     """
     query = db.query(Batch)
-    if current_user.role != UserRole.ADMIN.value:
+    if current_user.role != UserRole.ADMIN.value and scope != "all":
         query = query.filter(Batch.teacher_id == current_user.id)
 
     batches = query.order_by(Batch.name.asc()).all()

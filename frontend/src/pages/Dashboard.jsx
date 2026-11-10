@@ -1,6 +1,18 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Users, BookOpen, Shield, CheckCircle, Database, Server } from 'lucide-react';
+import {
+  Users,
+  BookOpen,
+  Camera,
+  BarChart2,
+  Calendar,
+  AlertTriangle,
+  CheckCircle2,
+  TrendingUp,
+  ArrowRight,
+  ShieldCheck,
+  Sparkles
+} from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import apiClient from '../api/client';
 
@@ -12,24 +24,42 @@ const Dashboard = () => {
     loading: true,
   });
 
+  const [dashboardSummary, setDashboardSummary] = useState({
+    today_sessions_count: 0,
+    today_present_count: 0,
+    today_absent_count: 0,
+    today_attendance_rate: 0,
+    low_attendance_students: [],
+    loading: true,
+  });
+
   useEffect(() => {
     const fetchDashboardData = async () => {
       try {
-        const [studentsRes, batchesRes] = await Promise.all([
-          apiClient.get('/students/?limit=1'),
+        const [studentsRes, batchesRes, reportsRes] = await Promise.all([
+          apiClient.get('/students/?limit=500'),
           apiClient.get('/batches/'),
+          apiClient.get('/reports/dashboard').catch(() => ({ data: null })),
         ]);
 
-        // Get total counts
-        const allStudentsRes = await apiClient.get('/students/?limit=500');
         setStats({
-          studentsCount: allStudentsRes.data.length,
+          studentsCount: studentsRes.data.length,
           batchesCount: batchesRes.data.length,
           loading: false,
         });
+
+        if (reportsRes?.data) {
+          setDashboardSummary({
+            ...reportsRes.data,
+            loading: false,
+          });
+        } else {
+          setDashboardSummary((prev) => ({ ...prev, loading: false }));
+        }
       } catch (err) {
         console.error('Failed to load dashboard data', err);
         setStats((prev) => ({ ...prev, loading: false }));
+        setDashboardSummary((prev) => ({ ...prev, loading: false }));
       }
     };
 
@@ -43,21 +73,27 @@ const Dashboard = () => {
         <div>
           <h1 className="page-title">Welcome back, {user?.name}!</h1>
           <p className="page-subtitle">
-            FaceMark Tuition Attendance System • Phase 1 Core Infrastructure
+            AttendIQ Smart Biometric Attendance Suite • AI Recognition & Real-Time Analytics
           </p>
+        </div>
+        <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+          <Link to="/attendance" className="btn btn-primary">
+            <Camera size={16} /> Take Attendance
+          </Link>
+          <Link to="/reports" className="btn btn-secondary">
+            <BarChart2 size={16} /> View Reports
+          </Link>
         </div>
       </div>
 
-      {/* Stats Cards */}
+      {/* KPI Stats Grid */}
       <div className="stats-grid">
         <div className="stat-card">
           <div className="stat-icon blue">
             <Users size={24} />
           </div>
           <div>
-            <div className="stat-value">
-              {stats.loading ? '...' : stats.studentsCount}
-            </div>
+            <div className="stat-value">{stats.loading ? '...' : stats.studentsCount}</div>
             <div className="stat-label">Enrolled Students</div>
           </div>
         </div>
@@ -67,70 +103,194 @@ const Dashboard = () => {
             <BookOpen size={24} />
           </div>
           <div>
-            <div className="stat-value">
-              {stats.loading ? '...' : stats.batchesCount}
-            </div>
+            <div className="stat-value">{stats.loading ? '...' : stats.batchesCount}</div>
             <div className="stat-label">Active Batches</div>
           </div>
         </div>
 
         <div className="stat-card">
           <div className="stat-icon green">
-            <Shield size={24} />
+            <Calendar size={24} />
           </div>
           <div>
-            <div className="stat-value" style={{ textTransform: 'capitalize' }}>
-              {user?.role}
+            <div className="stat-value">
+              {dashboardSummary.loading ? '...' : dashboardSummary.today_sessions_count}
             </div>
-            <div className="stat-label">Current Role Privileges</div>
+            <div className="stat-label">Today's Sessions</div>
+          </div>
+        </div>
+
+        <div className="stat-card">
+          <div className="stat-icon amber">
+            <TrendingUp size={24} />
+          </div>
+          <div>
+            <div className="stat-value">
+              {dashboardSummary.loading ? '...' : `${dashboardSummary.today_attendance_rate}%`}
+            </div>
+            <div className="stat-label">Today's Attendance Rate</div>
           </div>
         </div>
       </div>
 
-      {/* Quick Action Navigation */}
+      {/* Today's Attendance Overview Card */}
       <div className="card" style={{ marginBottom: '1.5rem' }}>
-        <h3 style={{ fontSize: '1.1rem', marginBottom: '1rem', fontWeight: 700 }}>
-          Quick Navigation
-        </h3>
-        <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
-          <Link to="/students" className="btn btn-primary">
-            <Users size={16} /> Manage Students
+        <div className="section-header" style={{ marginBottom: '1rem' }}>
+          <div>
+            <h3 style={{ fontSize: '1.1rem', fontWeight: 700, margin: 0 }}>
+              Today's Attendance Overview
+            </h3>
+            <p className="text-muted text-sm" style={{ margin: '0.25rem 0 0 0' }}>
+              Summary of all student attendance records marked today ({new Date().toLocaleDateString()}).
+            </p>
+          </div>
+          <Link to="/attendance" className="btn btn-primary btn-sm">
+            <Camera size={14} /> Record Today's Session
           </Link>
-          <Link to="/batches" className="btn btn-secondary">
-            <BookOpen size={16} /> Manage Batches & Enrollments
-          </Link>
+        </div>
+
+        <div className="kpi-mini-bar" style={{ marginBottom: 0 }}>
+          <div className="kpi-mini blue">
+            <span className="kpi-count">{dashboardSummary.today_sessions_count}</span>
+            <span className="kpi-label">Sessions Held</span>
+          </div>
+          <div className="kpi-mini green">
+            <span className="kpi-count">{dashboardSummary.today_present_count}</span>
+            <span className="kpi-label">Present Marks</span>
+          </div>
+          <div className="kpi-mini red">
+            <span className="kpi-count">{dashboardSummary.today_absent_count}</span>
+            <span className="kpi-label">Absent Marks</span>
+          </div>
+          <div className="kpi-mini amber">
+            <span className="kpi-count">{dashboardSummary.today_attendance_rate}%</span>
+            <span className="kpi-label">Attendance Rate</span>
+          </div>
         </div>
       </div>
 
-      {/* Viva / Project Overview Card */}
-      <div className="card">
-        <h3 style={{ fontSize: '1.1rem', marginBottom: '0.75rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <CheckCircle size={20} color="var(--success)" />
-          Phase 1 Architecture Status & Viva Reference
-        </h3>
-        <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: '1.25rem' }}>
-          This system implements Phase 1 of FaceMark according to the modular relational schema:
-        </p>
-
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1rem' }}>
-          <div style={{ padding: '1rem', background: '#f8fafc', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)' }}>
-            <h4 style={{ fontSize: '0.9rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.4rem' }}>
-              <Server size={16} color="var(--primary)" /> FastAPI & Synchronous SQLAlchemy
-            </h4>
-            <p style={{ fontSize: '0.825rem', color: 'var(--text-secondary)' }}>
-              Uses synchronous database sessions with clean, educational <code>def</code> route handlers, bcrypt password verification, and JWT Bearer token RBAC.
-            </p>
+      {/* Low Attendance Student Alerts (< 75%) */}
+      {dashboardSummary.low_attendance_students.length > 0 && (
+        <div className="card" style={{ marginBottom: '1.5rem', borderLeft: '4px solid #f59e0b' }}>
+          <div className="section-header" style={{ marginBottom: '1rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <AlertTriangle size={20} className="text-amber" />
+              <h3 style={{ fontSize: '1.1rem', fontWeight: 700, margin: 0 }}>
+                Low Attendance Alerts (&lt; 75% Threshold)
+              </h3>
+            </div>
+            <Link to="/reports" className="btn btn-secondary btn-sm">
+              View Full Analytics <ArrowRight size={14} />
+            </Link>
           </div>
 
-          <div style={{ padding: '1rem', background: '#f8fafc', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)' }}>
-            <h4 style={{ fontSize: '0.9rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.4rem' }}>
-              <Database size={16} color="var(--primary)" /> 7 Normalized PostgreSQL Tables
-            </h4>
-            <p style={{ fontSize: '0.825rem', color: 'var(--text-secondary)' }}>
-              Tables: <code>users</code>, <code>students</code>, <code>batches</code>, <code>enrollments</code>, <code>face_embeddings</code>, <code>attendance_sessions</code>, and <code>attendance_records</code>.
-            </p>
+          <div className="table-responsive">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Roll Number</th>
+                  <th>Student Name</th>
+                  <th>Present</th>
+                  <th>Absent</th>
+                  <th>Total Sessions</th>
+                  <th>Attendance Rate</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {dashboardSummary.low_attendance_students.map((stu) => (
+                  <tr key={stu.student_id}>
+                    <td>
+                      <strong>{stu.roll_number}</strong>
+                    </td>
+                    <td>{stu.full_name}</td>
+                    <td>
+                      <span className="badge badge-success">{stu.present_count}</span>
+                    </td>
+                    <td>
+                      <span className="badge badge-danger">{stu.absent_count}</span>
+                    </td>
+                    <td>{stu.total_sessions}</td>
+                    <td>
+                      <div className="progress-container">
+                        <div className="progress-bar-bg">
+                          <div
+                            className="progress-bar-fill danger"
+                            style={{ width: `${Math.min(100, stu.attendance_percentage)}%` }}
+                          ></div>
+                        </div>
+                        <span className="progress-text">{stu.attendance_percentage}%</span>
+                      </div>
+                    </td>
+                    <td>
+                      <span className="badge badge-danger">
+                        <AlertTriangle size={12} /> Low (&lt; 75%)
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
+      )}
+
+      {/* Quick Navigation Cards */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+          gap: '1rem',
+          marginBottom: '1.5rem',
+        }}
+      >
+        <Link to="/attendance" className="card" style={{ textDecoration: 'none', color: 'inherit' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem' }}>
+            <div className="stat-icon blue" style={{ width: 40, height: 40 }}>
+              <Camera size={20} />
+            </div>
+            <h4 style={{ margin: 0, fontWeight: 700 }}>Take Attendance</h4>
+          </div>
+          <p className="text-muted text-sm" style={{ margin: 0 }}>
+            Upload class photo for AI recognition or record roster manually.
+          </p>
+        </Link>
+
+        <Link to="/reports" className="card" style={{ textDecoration: 'none', color: 'inherit' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem' }}>
+            <div className="stat-icon green" style={{ width: 40, height: 40 }}>
+              <BarChart2 size={20} />
+            </div>
+            <h4 style={{ margin: 0, fontWeight: 700 }}>Attendance Reports</h4>
+          </div>
+          <p className="text-muted text-sm" style={{ margin: 0 }}>
+            View trend line charts, session distributions, and export CSVs.
+          </p>
+        </Link>
+
+        <Link to="/students" className="card" style={{ textDecoration: 'none', color: 'inherit' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem' }}>
+            <div className="stat-icon indigo" style={{ width: 40, height: 40 }}>
+              <Users size={20} />
+            </div>
+            <h4 style={{ margin: 0, fontWeight: 700 }}>Student Management</h4>
+          </div>
+          <p className="text-muted text-sm" style={{ margin: 0 }}>
+            Add students, manage face consent, and upload portrait biometrics.
+          </p>
+        </Link>
+
+        <Link to="/batches" className="card" style={{ textDecoration: 'none', color: 'inherit' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem' }}>
+            <div className="stat-icon amber" style={{ width: 40, height: 40 }}>
+              <BookOpen size={20} />
+            </div>
+            <h4 style={{ margin: 0, fontWeight: 700 }}>Batch Enrollments</h4>
+          </div>
+          <p className="text-muted text-sm" style={{ margin: 0 }}>
+            Create academic batches and assign students and teachers.
+          </p>
+        </Link>
       </div>
     </div>
   );

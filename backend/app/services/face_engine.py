@@ -30,7 +30,7 @@ def validate_image_file(filename: str, content: bytes) -> Tuple[np.ndarray, int,
     max_bytes = settings.MAX_UPLOAD_MB * 1024 * 1024
     if len(content) > max_bytes:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
             detail=f"File '{filename}' exceeds maximum allowed size of {settings.MAX_UPLOAD_MB}MB."
         )
 
@@ -197,6 +197,7 @@ class FaceEngine:
         # candidate_scores: list of (similarity_score, face_index, student_id, student_name)
         candidate_matches = []
         best_score_per_face = [0.0] * num_faces
+        best_candidate_per_face = [None] * num_faces
 
         for face_idx, face in enumerate(detected_faces):
             face_vec = np.array(face["embedding"], dtype=np.float32)
@@ -218,6 +219,7 @@ class FaceEngine:
 
                 if max_student_score > best_score_per_face[face_idx]:
                     best_score_per_face[face_idx] = max_student_score
+                    best_candidate_per_face[face_idx] = (student_id, student_name)
 
                 candidate_matches.append((
                     max_student_score,
@@ -254,11 +256,12 @@ class FaceEngine:
         # Populate unassigned faces as 'unknown'
         for face_idx in range(num_faces):
             if face_results[face_idx] is None:
+                cand = best_candidate_per_face[face_idx]
                 face_results[face_idx] = {
                     "bbox": detected_faces[face_idx]["bbox"],
                     "det_score": detected_faces[face_idx]["det_score"],
                     "student_id": None,
-                    "student_name": None,
+                    "student_name": cand[1] if cand else None,
                     "score": round(best_score_per_face[face_idx], 4),
                     "status": "unknown"
                 }

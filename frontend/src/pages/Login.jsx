@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { Lock, Mail, AlertCircle, ArrowRight } from 'lucide-react';
+import { AttendIQIcon } from '../components/AttendIQLogo';
 
 const Login = () => {
   const [email, setEmail] = useState('');
@@ -40,17 +41,35 @@ const Login = () => {
     <div className="login-screen">
       <div className="login-card">
         <div className="login-brand">
-          <div className="login-logo">F</div>
-          <h1 style={{ fontSize: '1.5rem', fontWeight: 800, color: 'var(--text-primary)' }}>FaceMark</h1>
-          <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem', marginTop: '0.25rem' }}>
-            Tuition Center Attendance System
+          <div style={{ display: 'inline-flex', marginBottom: '0.85rem' }}>
+            <AttendIQIcon size={64} />
+          </div>
+          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'center', gap: '3px', lineHeight: 1 }}>
+            <span style={{ fontSize: '1.75rem', fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '-0.025em' }}>
+              Attend
+            </span>
+            <span
+              style={{
+                fontSize: '1.75rem',
+                fontWeight: 900,
+                background: 'linear-gradient(135deg, #2563EB 0%, #06B6D4 100%)',
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent',
+                letterSpacing: '-0.025em',
+              }}
+            >
+              IQ
+            </span>
+          </div>
+          <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem', marginTop: '0.35rem', fontWeight: 500 }}>
+            Smart Biometric Attendance & Student Analytics
           </p>
         </div>
 
         {/* Quick-fill buttons for viva presentation */}
         <div className="demo-credentials-box">
           <div className="demo-title">Viva Quick-Fill Credentials</div>
-          <div className="demo-btn-group">
+          <div className="demo-btn-group" style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
             <button
               type="button"
               className="btn btn-secondary btn-sm"
@@ -62,8 +81,17 @@ const Login = () => {
               type="button"
               className="btn btn-secondary btn-sm"
               onClick={() => handleQuickFill('teacher@facemark.local', 'teacher123')}
+              title="Prof. Rajesh Sharma (Mathematics & Physics)"
             >
-              Fill Teacher
+              Prof. Sharma
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={() => handleQuickFill('neha.kapoor@facemark.local', 'teacher123')}
+              title="Dr. Neha Kapoor (Chemistry & Biology)"
+            >
+              Dr. Kapoor
             </button>
           </div>
         </div>

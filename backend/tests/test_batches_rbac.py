@@ -17,43 +17,6 @@ from app.core.security import get_password_hash, create_access_token
 from app.models.user import User, UserRole
 from app.models.batch import Batch
 
-# In-memory SQLite database for isolated, fast unit testing
-TEST_DATABASE_URL = "sqlite:///:memory:"
-
-engine = create_engine(
-    TEST_DATABASE_URL,
-    connect_args={"check_same_thread": False},
-    poolclass=StaticPool,
-)
-TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-
-def override_get_db():
-    db = TestingSessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
-
-# Override dependency in FastAPI application
-app.dependency_overrides[get_db] = override_get_db
-
-
-@pytest.fixture(scope="function")
-def db_session():
-    """Create fresh tables for every test function and tear them down afterwards."""
-    Base.metadata.create_all(bind=engine)
-    db = TestingSessionLocal()
-    yield db
-    db.close()
-    Base.metadata.drop_all(bind=engine)
-
-
-@pytest.fixture(scope="function")
-def client():
-    return TestClient(app)
-
 
 @pytest.fixture(scope="function")
 def setup_rbac_data(db_session):

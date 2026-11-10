@@ -1,0 +1,51 @@
+# ==========================================
+# Production Dockerfile: Backend (FastAPI)
+# Runs as non-root user with 1 Uvicorn worker
+# ==========================================
+
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV INSIGHTFACE_HOME=/home/appuser/.insightface
+
+# Install system dependencies required by OpenCV, psycopg2, and InsightFace
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    g++ \
+    gcc \
+    libpq-dev \
+    libgl1 \
+    libglib2.0-0 \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create non-root group and user
+RUN groupadd -g 1000 appgroup && \
+    useradd -u 1000 -g appgroup -m -s /bin/bash appuser
+
+WORKDIR /app
+
+# Install python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
+
+# Copy source code and ensure proper non-root file permissions
+COPY --chown=appuser:appgroup . .
+
+# Ensure insightface model cache directory exists and is owned by appuser
+RUN mkdir -p /home/appuser/.insightface && \
+    chown -R appuser:appgroup /home/appuser /app
+
+# Switch to non-root user
+USER appuser
+
+EXPOSE 8000
+
+# Docker Healthcheck targeting the /health endpoint
+HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+# Launch with exactly ONE uvicorn worker to preserve memory for the InsightFace model
+CMD ["sh", "-c", "alembic upgrade head && python seed.py && uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1"]

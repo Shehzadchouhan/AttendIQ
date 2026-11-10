@@ -1,33 +1,38 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
+from app.core.limiter import limiter, HAS_SLOWAPI, RateLimitExceeded, _rate_limit_exceeded_handler
 from app.api.v1 import api_router
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
     version=settings.VERSION,
     description="""
-    ## FaceMark Backend API (Phase 1)
+    ## FaceMark Backend API (Phase 1, 2, 3 & 4)
     
     A tuition center management & attendance backend system built with FastAPI, PostgreSQL, and SQLAlchemy.
     
-    ### Features in Phase 1:
+    ### Features:
     * **Role-Based Access Control**: Admin and Teacher permissions via secure JWT Bearer tokens.
-    * **Student Management**: Full CRUD operations with unique roll numbers.
-    * **Batch & Enrollment Management**: Academic groups and student enrollments with cascade constraints.
-    * **Phase 2 Ready**: Database schema ready for Face Embeddings and Attendance Sessions/Records.
+    * **Student & Batch Management**: Full CRUD operations with cascade constraints and roll numbers.
+    * **Biometric Face Engine**: Zero-raw-photo storage face recognition pipeline powered by InsightFace.
+    * **Attendance Review & Reports**: Interactive review flow, duplicate date protection, Recharts data, and CSV export.
+    * **DevOps & Security Hardening**: Rate limiting, dynamic CORS, multi-stage production containerization.
     """,
     docs_url="/docs",
     redoc_url="/redoc",
     openapi_url="/openapi.json"
 )
 
-# Configure Cross-Origin Resource Sharing (CORS)
-# Allows the React + Vite frontend (running on localhost:5173 or container network)
-# to make asynchronous HTTP requests to this backend.
+# Attach rate limiter to app state and register 429 handler if slowapi is installed
+if HAS_SLOWAPI and RateLimitExceeded and _rate_limit_exceeded_handler:
+    app.state.limiter = limiter
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# Configure Cross-Origin Resource Sharing (CORS) dynamically from settings
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # For production, specify exact frontend domain(s)
+    allow_origins=settings.cors_origins_list,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -41,9 +46,11 @@ app.include_router(api_router, prefix=settings.API_V1_STR)
 def startup_event():
     """
     Application startup event handler:
-    Pre-loads (warms up) the InsightFace recognition model weights into memory on startup
-    to prevent cold-start latency on the first request.
+    1. Validates production security credentials (passwords, secret keys).
+    2. Pre-loads (warms up) the InsightFace recognition model weights into memory on startup
+       to prevent cold-start latency on the first request.
     """
+    settings.validate_production_security()
     from app.services.face_engine import face_engine
     face_engine.initialize()
 

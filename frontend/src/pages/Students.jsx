@@ -15,9 +15,12 @@ import {
 } from 'lucide-react';
 import apiClient from '../api/client';
 import { useAuth } from '../context/AuthContext';
+import { useToast } from '../context/ToastContext';
+import WebcamModal from '../components/WebcamModal';
 
 const Students = () => {
   const { isAdmin } = useAuth();
+  const { toast } = useToast();
   const [students, setStudents] = useState([]);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
@@ -48,6 +51,17 @@ const Students = () => {
   const [selectedPhotos, setSelectedPhotos] = useState([]);
   const [photoPreviews, setPhotoPreviews] = useState([]);
   const [uploadingFaces, setUploadingFaces] = useState(false);
+  const [isWebcamOpen, setIsWebcamOpen] = useState(false);
+
+  const handleWebcamCapture = (file, previewUrl) => {
+    if (selectedPhotos.length >= 5) {
+      setFaceError('You can upload at most 5 photos at a time.');
+      return;
+    }
+    setFaceError('');
+    setSelectedPhotos((prev) => [...prev, file]);
+    setPhotoPreviews((prev) => [...prev, previewUrl]);
+  };
 
   const fetchStudents = async (query = '') => {
     try {
@@ -99,21 +113,23 @@ const Students = () => {
     try {
       if (editingStudent) {
         await apiClient.put(`/students/${editingStudent.id}`, formData);
+        toast.success(`Student ${formData.full_name} updated successfully.`);
       } else {
         await apiClient.post('/students/', formData);
+        toast.success(`Student ${formData.full_name} registered successfully.`);
       }
       setIsModalOpen(false);
       fetchStudents(search);
     } catch (err) {
-      setFormError(
-        err.response?.data?.detail || 'Failed to save student details. Please verify the input.'
-      );
+      const errMsg = err.response?.data?.detail || 'Failed to save student details. Please verify the input.';
+      setFormError(errMsg);
+      toast.error(errMsg);
     }
   };
 
   const handleDeleteStudent = async (studentId, studentName) => {
     if (!isAdmin) {
-      alert('Only Administrators can delete student records.');
+      toast.warning('Only Administrators can delete student records.');
       return;
     }
 
@@ -124,9 +140,11 @@ const Students = () => {
     ) {
       try {
         await apiClient.delete(`/students/${studentId}`);
+        toast.success(`Student "${studentName}" deleted.`);
         fetchStudents(search);
       } catch (err) {
-        alert(err.response?.data?.detail || 'Failed to delete student.');
+        const errMsg = err.response?.data?.detail || 'Failed to delete student.';
+        toast.error(errMsg);
       }
     }
   };
@@ -231,15 +249,15 @@ const Students = () => {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
       setFaceSuccess(res.data.message);
+      toast.success(res.data.message);
       setFaceData((prev) => ({ ...prev, enrolled_count: res.data.enrolled_count }));
       setSelectedPhotos([]);
       setPhotoPreviews([]);
       fetchStudents(search);
     } catch (err) {
-      setFaceError(
-        err.response?.data?.detail ||
-          'Failed to enroll face photos. Please ensure each photo has exactly one face.'
-      );
+      const errMsg = err.response?.data?.detail || 'Failed to enroll face photos. Please ensure each photo has exactly one face.';
+      setFaceError(errMsg);
+      toast.error(errMsg);
     } finally {
       setUploadingFaces(false);
     }
@@ -260,10 +278,13 @@ const Students = () => {
     try {
       await apiClient.delete(`/students/${selectedStudent.id}/faces`);
       setFaceSuccess('All face embeddings deleted successfully.');
+      toast.info('All face embeddings deleted successfully.');
       setFaceData((prev) => ({ ...prev, enrolled_count: 0 }));
       fetchStudents(search);
     } catch (err) {
-      setFaceError(err.response?.data?.detail || 'Failed to delete face data.');
+      const errMsg = err.response?.data?.detail || 'Failed to delete face data.';
+      setFaceError(errMsg);
+      toast.error(errMsg);
     }
   };
 
@@ -641,16 +662,41 @@ const Students = () => {
               {faceData.consent_given ? (
                 <form onSubmit={handleUploadFaces}>
                   <div className="form-group">
-                    <label className="form-label">Upload Portrait Photos (1 to 5 images)</label>
-                    <input
-                      type="file"
-                      multiple
-                      accept=".jpg,.jpeg,.png"
-                      onChange={handlePhotoSelect}
-                      className="form-input"
-                    />
-                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.3rem' }}>
-                      Clear, front-facing single-person photos (JPG/PNG, max 10MB each).
+                    <label className="form-label" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span>Add Portrait Photos (1 to 5 images)</span>
+                      <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--primary)' }}>
+                        {selectedPhotos.length} / 5 Selected
+                      </span>
+                    </label>
+
+                    {/* Camera and Upload Buttons Group */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginBottom: '0.75rem' }}>
+                      <button
+                        type="button"
+                        onClick={() => setIsWebcamOpen(true)}
+                        className="btn btn-primary"
+                        style={{ justifyContent: 'center', gap: '0.5rem', padding: '0.65rem' }}
+                      >
+                        <Camera size={16} /> Use Live Webcam
+                      </button>
+
+                      <label
+                        className="btn btn-secondary"
+                        style={{ justifyContent: 'center', gap: '0.5rem', padding: '0.65rem', cursor: 'pointer', margin: 0 }}
+                      >
+                        <Upload size={16} /> Browse Files
+                        <input
+                          type="file"
+                          multiple
+                          accept=".jpg,.jpeg,.png"
+                          onChange={handlePhotoSelect}
+                          style={{ display: 'none' }}
+                        />
+                      </label>
+                    </div>
+
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                      Front-facing single-person photos. Snap with webcam/mobile or select image files.
                     </div>
                   </div>
 
@@ -752,6 +798,16 @@ const Students = () => {
           </div>
         </div>
       )}
+      {/* Live Webcam Modal for Portrait Enrollment */}
+      <WebcamModal
+        isOpen={isWebcamOpen}
+        onClose={() => setIsWebcamOpen(false)}
+        onCapture={handleWebcamCapture}
+        title="Student Portrait Capture"
+        subtitle={`Align ${selectedStudent?.full_name || 'student'} within the oval guide for optimal recognition`}
+        overlayType="portrait"
+        defaultFacingMode="user"
+      />
     </div>
   );
 };
