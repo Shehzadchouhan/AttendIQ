@@ -114,6 +114,7 @@ const WebcamModal = ({
     return () => {
       stopStream();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, facingMode, selectedDeviceId]);
 
   // Snap photo from video frame

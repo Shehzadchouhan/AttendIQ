@@ -5,7 +5,7 @@ import {
   Users,
   BookOpen,
   Camera,
-  BarChart2,
+  MessageSquare,
 } from 'lucide-react';
 
 const BottomNav = () => {
@@ -62,15 +62,26 @@ const BottomNav = () => {
       </NavLink>
 
       <NavLink
-        to="/reports"
+        to="/chat"
         className={({ isActive }) =>
           `bottom-nav-item ${isActive ? 'active' : ''}`
         }
       >
-        <div className="bottom-nav-icon">
-          <BarChart2 size={20} />
+        <div className="bottom-nav-icon" style={{ position: 'relative' }}>
+          <MessageSquare size={20} />
+          <span
+            style={{
+              position: 'absolute',
+              top: '-1px',
+              right: '-3px',
+              width: '6px',
+              height: '6px',
+              borderRadius: '50%',
+              backgroundColor: '#10b981'
+            }}
+          />
         </div>
-        <span className="bottom-nav-label">Reports</span>
+        <span className="bottom-nav-label">Chat</span>
       </NavLink>
     </nav>
   );

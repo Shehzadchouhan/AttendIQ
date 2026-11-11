@@ -1,9 +1,45 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, BookOpen, Users, Edit2, Trash2, X, AlertCircle, UserPlus, UserMinus, UserCheck, Calendar } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import {
+  Plus,
+  BookOpen,
+  Users,
+  Edit2,
+  Trash2,
+  X,
+  AlertCircle,
+  UserPlus,
+  UserMinus,
+  UserCheck,
+  Calendar,
+  Camera,
+  CheckCircle2,
+  Sparkles,
+  Award,
+  ChevronRight
+} from 'lucide-react';
 import apiClient from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import SessionHistoryModal from '../components/SessionHistoryModal';
+import Card from '../components/ui/Card';
+import Badge from '../components/ui/Badge';
+import Button from '../components/ui/Button';
+import Modal from '../components/ui/Modal';
+import EmptyState from '../components/ui/EmptyState';
+import Skeleton from '../components/ui/Skeleton';
+import Avatar from '../components/ui/Avatar';
+
+// Gradient palette for batch cards
+const BATCH_GRADIENTS = [
+  'linear-gradient(135deg, rgba(79, 70, 229, 0.12) 0%, rgba(124, 58, 237, 0.04) 100%)',
+  'linear-gradient(135deg, rgba(6, 182, 212, 0.12) 0%, rgba(59, 130, 246, 0.04) 100%)',
+  'linear-gradient(135deg, rgba(16, 185, 129, 0.12) 0%, rgba(5, 150, 105, 0.04) 100%)',
+  'linear-gradient(135deg, rgba(245, 158, 11, 0.12) 0%, rgba(217, 119, 6, 0.04) 100%)',
+  'linear-gradient(135deg, rgba(236, 72, 153, 0.12) 0%, rgba(168, 85, 247, 0.04) 100%)',
+];
+
+const BATCH_ACCENTS = ['#6366f1', '#06b6d4', '#10b981', '#f59e0b', '#ec4899'];
 
 const Batches = () => {
   const { user, isAdmin } = useAuth();
@@ -31,8 +67,9 @@ const Batches = () => {
   const [selectedStudentToEnroll, setSelectedStudentToEnroll] = useState('');
   const [enrollError, setEnrollError] = useState('');
   const [enrollSuccess, setEnrollSuccess] = useState('');
+  const [enrollingLoading, setEnrollingLoading] = useState(false);
 
-  // Scope filter: 'all' to show all 5 coaching batches, 'my' to show teacher-assigned batches
+  // Scope filter: 'all' to show all batches, 'my' to show teacher-assigned batches
   const [filterScope, setFilterScope] = useState('all');
 
   // Session History Modal
@@ -49,9 +86,10 @@ const Batches = () => {
       setLoading(true);
       const url = filterScope === 'my' && !isAdmin ? '/batches/' : '/batches/?scope=all';
       const res = await apiClient.get(url);
-      setBatches(res.data);
+      setBatches(res.data || []);
     } catch (err) {
       console.error('Failed to load batches', err);
+      toast.error('Failed to load batch list.');
     } finally {
       setLoading(false);
     }
@@ -60,7 +98,7 @@ const Batches = () => {
   const fetchTeachers = async () => {
     try {
       const res = await apiClient.get('/batches/teachers');
-      setTeachersList(res.data);
+      setTeachersList(res.data || []);
     } catch (err) {
       console.error('Failed to load teachers list', err);
     }
@@ -71,6 +109,7 @@ const Batches = () => {
     if (isAdmin) {
       fetchTeachers();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAdmin, filterScope]);
 
   const handleOpenAddBatch = () => {
@@ -102,9 +141,9 @@ const Batches = () => {
     setBatchFormError('');
 
     const payload = {
-      name: batchFormData.name,
-      subject: batchFormData.subject,
-      description: batchFormData.description,
+      name: batchFormData.name.trim(),
+      subject: batchFormData.subject.trim(),
+      description: batchFormData.description.trim(),
     };
 
     if (isAdmin && batchFormData.teacher_id) {
@@ -154,12 +193,13 @@ const Batches = () => {
     setIsEnrollModalOpen(true);
 
     try {
+      setEnrollingLoading(true);
       const [detailRes, studentsRes] = await Promise.all([
         apiClient.get(`/batches/${batch.id}`),
         apiClient.get('/students/?limit=500'),
       ]);
       setBatchDetails(detailRes.data);
-      setAllStudents(studentsRes.data);
+      setAllStudents(studentsRes.data || []);
 
       const enrolledIds = new Set(
         (detailRes.data.enrolled_students || []).map((s) => s.id)
@@ -176,6 +216,8 @@ const Batches = () => {
     } catch (err) {
       console.error('Error fetching batch details for enrollment', err);
       setEnrollError(err.response?.data?.detail || 'Failed to load batch enrollments.');
+    } finally {
+      setEnrollingLoading(false);
     }
   };
 
@@ -235,492 +277,445 @@ const Batches = () => {
   };
 
   return (
-    <div className="page-container">
-      {/* Header */}
-      <div className="page-header">
+    <div className="page-container" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+      {/* 1. HEADER ROW */}
+      <div
+        className="page-header"
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: '1rem',
+        }}
+      >
         <div>
-          <h1 className="page-title">Batches Management</h1>
-          <p className="page-subtitle">
-            {isAdmin
-              ? 'Organize classes, assign teachers, and manage enrollments'
-              : 'View all coaching batches and manage enrollments in your assigned classes'}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.2rem' }}>
+            <h1 className="page-title" style={{ fontSize: '1.75rem', fontWeight: 800, margin: 0 }}>
+              Academic Batches
+            </h1>
+            <Badge variant="primary" size="sm">
+              {batches.length} Configured
+            </Badge>
+          </div>
+          <p className="page-subtitle" style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', margin: 0 }}>
+            Organize coaching batches, set subject curricula, and manage student enrollment rosters.
           </p>
         </div>
-        <button onClick={handleOpenAddBatch} className="btn btn-primary">
-          <Plus size={18} /> Create New Batch
-        </button>
+
+        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+          {/* Scope Filter Tabs */}
+          <div className="ui-theme-segmented">
+            <button
+              type="button"
+              className={`ui-theme-segmented-btn ${filterScope === 'all' ? 'active' : ''}`}
+              onClick={() => setFilterScope('all')}
+            >
+              All Batches
+            </button>
+            <button
+              type="button"
+              className={`ui-theme-segmented-btn ${filterScope === 'my' ? 'active' : ''}`}
+              onClick={() => setFilterScope('my')}
+            >
+              My Classes
+            </button>
+          </div>
+
+          <Button
+            variant="primary"
+            size="md"
+            onClick={handleOpenAddBatch}
+            icon={Plus}
+          >
+            Create New Batch
+          </Button>
+        </div>
       </div>
 
-      {/* Teacher View Scope Filter */}
-      {!isAdmin && (
-        <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.25rem', flexWrap: 'wrap' }}>
-          <button
-            type="button"
-            className={`btn btn-sm ${filterScope === 'all' ? 'btn-primary' : 'btn-secondary'}`}
-            onClick={() => setFilterScope('all')}
-          >
-            All Coaching Batches
-          </button>
-          <button
-            type="button"
-            className={`btn btn-sm ${filterScope === 'my' ? 'btn-primary' : 'btn-secondary'}`}
-            onClick={() => setFilterScope('my')}
-          >
-            My Assigned Batches
-          </button>
+      {/* 2. BATCHES RESPONSIVE CARD GRID */}
+      {loading ? (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1.25rem' }}>
+          <Skeleton variant="card" height={220} />
+          <Skeleton variant="card" height={220} />
+          <Skeleton variant="card" height={220} />
+        </div>
+      ) : batches.length === 0 ? (
+        <Card style={{ padding: '3.5rem 1.5rem' }}>
+          <EmptyState
+            icon={BookOpen}
+            title="No batches available"
+            description="Create your first academic batch to begin enrolling students and marking attendance."
+            actionLabel="Create Batch"
+            onAction={handleOpenAddBatch}
+          />
+        </Card>
+      ) : (
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
+            gap: '1.25rem',
+          }}
+        >
+          {batches.map((batch, index) => {
+            const accent = BATCH_ACCENTS[index % BATCH_ACCENTS.length];
+            const bgGrad = BATCH_GRADIENTS[index % BATCH_GRADIENTS.length];
+            const enrolledCount = batch.student_count || (batch.enrolled_students?.length) || 0;
+
+            return (
+              <Card
+                key={batch.id}
+                hoverLift
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'space-between',
+                  padding: '1.5rem',
+                  borderTop: `4px solid ${accent}`,
+                  background: bgGrad,
+                  position: 'relative',
+                }}
+              >
+                <div>
+                  {/* Subject Tag & Quick Edit/Delete */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.75rem' }}>
+                    <Badge variant="accent" size="sm">
+                      {batch.subject}
+                    </Badge>
+                    {(isAdmin || batch.teacher_id === user?.id || !batch.teacher_id) && (
+                      <div style={{ display: 'flex', gap: '4px' }}>
+                        <button
+                          type="button"
+                          onClick={() => handleOpenEditBatch(batch)}
+                          title="Edit Batch"
+                          style={{
+                            background: 'transparent',
+                            border: 'none',
+                            color: 'var(--text-muted)',
+                            cursor: 'pointer',
+                            padding: '4px',
+                            borderRadius: 'var(--radius-sm)',
+                          }}
+                        >
+                          <Edit2 size={14} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteBatch(batch.id, batch.name)}
+                          title="Delete Batch"
+                          style={{
+                            background: 'transparent',
+                            border: 'none',
+                            color: 'var(--danger)',
+                            cursor: 'pointer',
+                            padding: '4px',
+                            borderRadius: 'var(--radius-sm)',
+                          }}
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Batch Title & Description */}
+                  <h3 style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--text-primary)', margin: 0, letterSpacing: '-0.02em' }}>
+                    {batch.name}
+                  </h3>
+                  <p style={{ fontSize: '0.825rem', color: 'var(--text-secondary)', marginTop: '0.35rem', lineHeight: 1.4, minHeight: '38px' }}>
+                    {batch.description || 'Core curriculum session with multi-face attendance tracking.'}
+                  </p>
+
+                  {/* Faculty Badge */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.85rem' }}>
+                    <Avatar name={batch.teacher_name || 'Faculty'} size="xs" />
+                    <div style={{ fontSize: '0.785rem', color: 'var(--text-secondary)' }}>
+                      Instructor: <strong style={{ color: 'var(--text-primary)' }}>{batch.teacher_name || 'Assigned Tutor'}</strong>
+                    </div>
+                  </div>
+
+                  {/* Enrolled Students Avatar Stack */}
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '1.25rem', paddingTop: '0.85rem', borderTop: '1px solid var(--border-color)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <div style={{ display: 'flex', marginLeft: '6px' }}>
+                        {[...Array(Math.min(3, enrolledCount))].map((_, i) => (
+                          <div
+                            key={i}
+                            style={{
+                              width: '26px',
+                              height: '26px',
+                              borderRadius: '50%',
+                              backgroundColor: accent,
+                              color: '#fff',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              fontSize: '0.65rem',
+                              fontWeight: 700,
+                              border: '2px solid var(--bg-card)',
+                              marginLeft: '-6px',
+                            }}
+                          >
+                            {String.fromCharCode(65 + i)}
+                          </div>
+                        ))}
+                      </div>
+                      <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                        {enrolledCount} {enrolledCount === 1 ? 'Student' : 'Students'}
+                      </span>
+                    </div>
+
+                    <Badge variant="success" size="sm">
+                      <CheckCircle2 size={11} style={{ marginRight: '3px' }} /> Active
+                    </Badge>
+                  </div>
+                </div>
+
+                {/* Batch Action Buttons */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr', gap: '0.5rem', marginTop: '1.25rem' }}>
+                  <Link
+                    to={`/attendance?batch_id=${batch.id}`}
+                    className="btn btn-primary btn-sm"
+                    style={{ justifyContent: 'center', gap: '4px', textDecoration: 'none' }}
+                  >
+                    <Camera size={13} />
+                    <span>Attend</span>
+                  </Link>
+
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => handleOpenEnrollModal(batch)}
+                    style={{ justifyContent: 'center', gap: '4px' }}
+                    title="Enroll students in this batch"
+                  >
+                    <Users size={13} />
+                    <span>Roster</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => handleOpenHistoryModal(batch)}
+                    style={{ justifyContent: 'center', gap: '4px' }}
+                    title="View session records and tamper-proof audit trail"
+                  >
+                    <Calendar size={13} />
+                    <span>Audit</span>
+                  </button>
+                </div>
+              </Card>
+            );
+          })}
         </div>
       )}
 
-      {/* Batches Table (Desktop Viewport) */}
-      <div className="table-container desktop-only">
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>ID</th>
-              <th>Batch Name</th>
-              <th>Subject</th>
-              <th>Assigned Teacher</th>
-              <th>Enrolled Students</th>
-              <th style={{ textAlign: 'right' }}>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading ? (
-              <tr>
-                <td colSpan="6" style={{ textAlign: 'center', padding: '2rem' }}>
-                  Loading batches...
-                </td>
-              </tr>
-            ) : batches.length === 0 ? (
-              <tr>
-                <td colSpan="6" style={{ textAlign: 'center', padding: '2.5rem', color: 'var(--text-secondary)' }}>
-                  {isAdmin
-                    ? 'No batches created yet. Click "Create New Batch" to add one!'
-                    : 'You currently have no batches assigned to you.'}
-                </td>
-              </tr>
-            ) : (
-              batches.map((batch) => (
-                <tr key={batch.id}>
-                  <td><strong>#{batch.id}</strong></td>
-                  <td style={{ fontWeight: 600 }}>{batch.name}</td>
-                  <td>
-                    <span className="badge" style={{ backgroundColor: '#eef2ff', color: 'var(--primary)' }}>
-                      {batch.subject}
-                    </span>
-                  </td>
-                  <td>
-                    {batch.teacher_name ? (
-                      <span style={{ fontWeight: 500, display: 'inline-flex', alignItems: 'center', gap: '0.35rem', flexWrap: 'wrap' }}>
-                        <UserCheck size={14} color="var(--primary)" /> {batch.teacher_name}
-                        {user?.name && batch.teacher_name.toLowerCase().includes(user.name.toLowerCase().split(' ').pop()) && (
-                          <span className="badge" style={{ backgroundColor: '#dcfce7', color: '#15803d', fontSize: '0.72rem', padding: '0.1rem 0.45rem' }}>
-                            Your Batch
-                          </span>
-                        )}
-                      </span>
-                    ) : (
-                      <span style={{ color: 'var(--text-muted)' }}>Unassigned</span>
-                    )}
-                  </td>
-                  <td>
-                    <button
-                      onClick={() => handleOpenEnrollModal(batch)}
-                      className="btn btn-secondary btn-sm"
-                      style={{ gap: '0.4rem' }}
-                    >
-                      <Users size={14} />
-                      {batch.enrolled_count} Students
-                    </button>
-                  </td>
-                  <td style={{ textAlign: 'right' }}>
-                    <div style={{ display: 'inline-flex', gap: '0.4rem', alignItems: 'center' }}>
-                      <button
-                        onClick={() => handleOpenHistoryModal(batch)}
-                        className="btn btn-secondary btn-sm"
-                        style={{ gap: '0.35rem', padding: '0.35rem 0.65rem' }}
-                        title="Inspect past attendance dates, face vs manual verification, unrecognized faces"
-                      >
-                        <Calendar size={14} /> History
-                      </button>
-                      <button
-                        onClick={() => handleOpenEditBatch(batch)}
-                        className="btn btn-secondary btn-icon"
-                        title="Edit Batch"
-                      >
-                        <Edit2 size={15} />
-                      </button>
-                      <button
-                        onClick={() => handleDeleteBatch(batch.id, batch.name)}
-                        className="btn btn-danger btn-icon"
-                        title={isAdmin ? 'Delete Batch (Admin Only)' : 'Admin role required to delete'}
-                        style={!isAdmin ? { opacity: 0.45, cursor: 'not-allowed' } : {}}
-                      >
-                        <Trash2 size={15} />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      {/* Mobile Batch Cards (< 768px Viewport) */}
-      <div className="mobile-batch-cards">
-        {loading ? (
-          <div className="card text-center" style={{ padding: '2.5rem', color: 'var(--text-secondary)' }}>
-            Loading batches...
-          </div>
-        ) : batches.length === 0 ? (
-          <div className="card text-center" style={{ padding: '2.5rem', color: 'var(--text-secondary)' }}>
-            {isAdmin
-              ? 'No batches created yet. Tap "Create New Batch" to add one!'
-              : 'You currently have no batches assigned to you.'}
-          </div>
-        ) : (
-          batches.map((batch) => {
-            const isMyBatch = Boolean(user?.name && batch.teacher_name && batch.teacher_name.toLowerCase().includes(user.name.toLowerCase().split(' ').pop()));
-            return (
-              <div key={`mob-batch-${batch.id}`} className="batch-mobile-card">
-                <div className="batch-card-top">
-                  <div>
-                    <h4 className="batch-card-name">{batch.name}</h4>
-                    <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', marginTop: '0.25rem', flexWrap: 'wrap' }}>
-                      <span className="badge" style={{ backgroundColor: '#eef2ff', color: 'var(--primary)' }}>
-                        {batch.subject}
-                      </span>
-                      {isMyBatch && (
-                        <span className="badge" style={{ backgroundColor: '#dcfce7', color: '#15803d' }}>
-                          Your Batch
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                  <span className="batch-id-chip">#{batch.id}</span>
-                </div>
-
-                <div className="batch-card-details">
-                  <div className="detail-item">
-                    <UserCheck size={14} color="var(--primary)" />
-                    <span>Faculty: <strong>{batch.teacher_name || 'Unassigned'}</strong></span>
-                  </div>
-                  <button
-                    onClick={() => handleOpenEnrollModal(batch)}
-                    className="btn btn-secondary btn-sm"
-                    style={{ gap: '0.35rem', padding: '0.3rem 0.65rem', fontWeight: 600 }}
-                  >
-                    <Users size={14} /> {batch.enrolled_count} Students
-                  </button>
-                </div>
-
-                {batch.description && (
-                  <p style={{ margin: '0.5rem 0', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-                    {batch.description}
-                  </p>
-                )}
-
-                <div className="batch-card-actions">
-                  <button
-                    onClick={() => handleOpenHistoryModal(batch)}
-                    className="btn btn-secondary btn-sm"
-                    style={{ flex: 1.2, justifyContent: 'center', gap: '0.35rem', fontWeight: 600 }}
-                    title="Inspect past attendance dates & audit trail"
-                  >
-                    <Calendar size={14} /> History
-                  </button>
-                  <button
-                    onClick={() => handleOpenEnrollModal(batch)}
-                    className="btn btn-secondary btn-sm"
-                    style={{ flex: 1, justifyContent: 'center', gap: '0.35rem', fontWeight: 600 }}
-                  >
-                    <Users size={14} /> Enroll
-                  </button>
-                  <button
-                    onClick={() => handleOpenEditBatch(batch)}
-                    className="btn btn-secondary btn-sm"
-                    style={{ flex: 0.8, justifyContent: 'center', gap: '0.35rem', fontWeight: 600 }}
-                  >
-                    <Edit2 size={14} /> Edit
-                  </button>
-                  {isAdmin && (
-                    <button
-                      onClick={() => handleDeleteBatch(batch.id, batch.name)}
-                      className="btn btn-danger btn-sm"
-                      style={{ justifyContent: 'center', padding: '0.4rem 0.65rem' }}
-                      title="Delete Batch"
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                  )}
-                </div>
-              </div>
-            );
-          })
-        )}
-      </div>
-
-      {/* Add / Edit Batch Modal */}
-      {isBatchModalOpen && (
-        <div className="modal-overlay">
-          <div className="modal-content">
-            <div className="modal-header">
-              <h3 className="modal-title">
-                {editingBatch ? 'Edit Batch Details' : 'Create New Batch'}
-              </h3>
-              <button
-                onClick={() => setIsBatchModalOpen(false)}
-                style={{ background: 'transparent', border: 'none', cursor: 'pointer' }}
-              >
-                <X size={20} />
-              </button>
+      {/* 3. MODAL: ADD / EDIT BATCH */}
+      <Modal
+        isOpen={isBatchModalOpen}
+        onClose={() => setIsBatchModalOpen(false)}
+        title={editingBatch ? 'Edit Batch' : 'Create New Academic Batch'}
+        description="Configure class name, academic subject, and assign faculty."
+        size="sm"
+      >
+        <form onSubmit={handleSaveBatch} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          {batchFormError && (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                backgroundColor: 'var(--danger-light)',
+                color: 'var(--danger)',
+                border: '1px solid var(--danger-border)',
+                padding: '0.75rem',
+                borderRadius: 'var(--radius-sm)',
+                fontSize: '0.825rem',
+              }}
+            >
+              <AlertCircle size={15} />
+              <span>{batchFormError}</span>
             </div>
+          )}
 
-            <form onSubmit={handleSaveBatch}>
-              <div className="modal-body">
-                {batchFormError && (
+          <div className="form-group">
+            <label className="form-label">Batch Name *</label>
+            <input
+              type="text"
+              required
+              className="form-input"
+              placeholder="e.g. Physics Grade 12 - Advanced"
+              value={batchFormData.name}
+              onChange={(e) => setBatchFormData({ ...batchFormData, name: e.target.value })}
+            />
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">Subject / Discipline *</label>
+            <input
+              type="text"
+              required
+              className="form-input"
+              placeholder="e.g. Physics, Mathematics, Science"
+              value={batchFormData.subject}
+              onChange={(e) => setBatchFormData({ ...batchFormData, subject: e.target.value })}
+            />
+          </div>
+
+          {isAdmin && (
+            <div className="form-group">
+              <label className="form-label">Faculty Instructor *</label>
+              <select
+                className="form-input"
+                value={batchFormData.teacher_id}
+                onChange={(e) => setBatchFormData({ ...batchFormData, teacher_id: e.target.value })}
+              >
+                {teachersList.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.full_name} ({t.email})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          <div className="form-group">
+            <label className="form-label">Description / Class Schedule</label>
+            <textarea
+              className="form-input"
+              rows={3}
+              placeholder="e.g. Meets Mon/Wed/Fri 4:00 PM - 5:30 PM"
+              value={batchFormData.description}
+              onChange={(e) => setBatchFormData({ ...batchFormData, description: e.target.value })}
+            />
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', marginTop: '0.5rem' }}>
+            <Button variant="secondary" type="button" onClick={() => setIsBatchModalOpen(false)}>
+              Cancel
+            </Button>
+            <Button variant="primary" type="submit">
+              {editingBatch ? 'Save Changes' : 'Create Batch'}
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* 4. MODAL: ROSTER & ENROLLEES MANAGEMENT */}
+      <Modal
+        isOpen={isEnrollModalOpen}
+        onClose={() => setIsEnrollModalOpen(false)}
+        title={`Roster: ${selectedBatch?.name || ''}`}
+        description="Enroll or remove students from this coaching batch."
+        size="md"
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+          {enrollError && (
+            <div style={{ padding: '0.75rem', backgroundColor: 'var(--danger-light)', color: 'var(--danger)', borderRadius: 'var(--radius-sm)', fontSize: '0.825rem' }}>
+              {enrollError}
+            </div>
+          )}
+          {enrollSuccess && (
+            <div style={{ padding: '0.75rem', backgroundColor: 'var(--success-light)', color: 'var(--success)', borderRadius: 'var(--radius-sm)', fontSize: '0.825rem' }}>
+              {enrollSuccess}
+            </div>
+          )}
+
+          {/* Enroll Student Form */}
+          <form onSubmit={handleEnrollStudent} style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-end' }}>
+            <div style={{ flex: 1 }}>
+              <label className="form-label">Add Enrolled Student</label>
+              <select
+                className="form-input"
+                value={selectedStudentToEnroll}
+                onChange={(e) => setSelectedStudentToEnroll(e.target.value)}
+                disabled={enrollingLoading}
+              >
+                {allStudents
+                  .filter((s) => !(batchDetails?.enrolled_students || []).some((es) => es.id === s.id))
+                  .map((stu) => (
+                    <option key={stu.id} value={stu.id}>
+                      {stu.roll_number} - {stu.full_name}
+                    </option>
+                  ))}
+              </select>
+            </div>
+            <Button variant="primary" type="submit" disabled={!selectedStudentToEnroll}>
+              <UserPlus size={15} /> Enroll
+            </Button>
+          </form>
+
+          {/* Currently Enrolled Students List */}
+          <div>
+            <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+              Currently Enrolled ({(batchDetails?.enrolled_students || []).length})
+            </span>
+            <div style={{ maxHeight: '280px', overflowY: 'auto', marginTop: '0.5rem', display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+              {(batchDetails?.enrolled_students || []).length === 0 ? (
+                <span style={{ fontSize: '0.825rem', color: 'var(--text-muted)', padding: '1rem 0' }}>
+                  No students currently enrolled in this batch.
+                </span>
+              ) : (
+                batchDetails.enrolled_students.map((stu) => (
                   <div
+                    key={stu.id}
                     style={{
                       display: 'flex',
                       alignItems: 'center',
-                      gap: '0.5rem',
-                      backgroundColor: 'var(--danger-light)',
-                      color: 'var(--danger)',
-                      padding: '0.75rem',
+                      justifyContent: 'space-between',
+                      padding: '0.65rem 0.85rem',
                       borderRadius: 'var(--radius-sm)',
-                      fontSize: '0.85rem',
-                      marginBottom: '1rem',
-                    }}
-                  >
-                    <AlertCircle size={16} />
-                    <span>{batchFormError}</span>
-                  </div>
-                )}
-
-                <div className="form-group">
-                  <label className="form-label">Batch Name *</label>
-                  <input
-                    type="text"
-                    required
-                    className="form-input"
-                    placeholder="e.g. Class 10 - Mathematics Morning"
-                    value={batchFormData.name}
-                    onChange={(e) => setBatchFormData({ ...batchFormData, name: e.target.value })}
-                  />
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label">Subject *</label>
-                  <input
-                    type="text"
-                    required
-                    className="form-input"
-                    placeholder="e.g. Mathematics"
-                    value={batchFormData.subject}
-                    onChange={(e) => setBatchFormData({ ...batchFormData, subject: e.target.value })}
-                  />
-                </div>
-
-                {/* Admin-only Teacher Assignment Dropdown */}
-                {isAdmin && (
-                  <div className="form-group">
-                    <label className="form-label">Assigned Teacher (Admin Only)</label>
-                    <select
-                      className="form-select"
-                      value={batchFormData.teacher_id}
-                      onChange={(e) => setBatchFormData({ ...batchFormData, teacher_id: e.target.value })}
-                    >
-                      <option value="">-- Unassigned --</option>
-                      {teachersList.map((t) => (
-                        <option key={t.id} value={t.id}>
-                          {t.full_name} ({t.email})
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
-
-                <div className="form-group">
-                  <label className="form-label">Description</label>
-                  <textarea
-                    rows={3}
-                    className="form-textarea"
-                    placeholder="Brief description or batch timings..."
-                    value={batchFormData.description}
-                    onChange={(e) => setBatchFormData({ ...batchFormData, description: e.target.value })}
-                  />
-                </div>
-              </div>
-
-              <div className="modal-footer">
-                <button
-                  type="button"
-                  onClick={() => setIsBatchModalOpen(false)}
-                  className="btn btn-secondary"
-                >
-                  Cancel
-                </button>
-                <button type="submit" className="btn btn-primary">
-                  {editingBatch ? 'Save Changes' : 'Create Batch'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Manage Enrollees Modal */}
-      {isEnrollModalOpen && (() => {
-        const enrolledIds = new Set(
-          (batchDetails?.enrolled_students || []).map((s) => s.id)
-        );
-        const availableStudents = allStudents.filter(
-          (s) => !enrolledIds.has(s.id)
-        );
-
-        return (
-          <div className="modal-overlay">
-            <div className="modal-content" style={{ maxWidth: '640px' }}>
-              <div className="modal-header">
-                <div>
-                  <h3 className="modal-title">Batch Enrollments</h3>
-                  <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                    {selectedBatch?.name} ({selectedBatch?.subject})
-                  </div>
-                </div>
-                <button
-                  onClick={() => setIsEnrollModalOpen(false)}
-                  style={{ background: 'transparent', border: 'none', cursor: 'pointer' }}
-                >
-                  <X size={20} />
-                </button>
-              </div>
-
-              <div className="modal-body">
-                {enrollError && (
-                  <div
-                    style={{
-                      backgroundColor: 'var(--danger-light)',
-                      color: 'var(--danger)',
-                      padding: '0.75rem',
-                      borderRadius: 'var(--radius-sm)',
-                      fontSize: '0.85rem',
-                      marginBottom: '1rem',
-                    }}
-                  >
-                    {enrollError}
-                  </div>
-                )}
-
-                {enrollSuccess && (
-                  <div
-                    style={{
-                      backgroundColor: 'var(--success-light)',
-                      color: '#047857',
-                      padding: '0.75rem',
-                      borderRadius: 'var(--radius-sm)',
-                      fontSize: '0.85rem',
-                      marginBottom: '1rem',
-                    }}
-                  >
-                    {enrollSuccess}
-                  </div>
-                )}
-
-                {/* Enroll Form */}
-                {availableStudents.length === 0 ? (
-                  <div
-                    style={{
-                      padding: '0.75rem 1rem',
-                      backgroundColor: '#f8fafc',
+                      backgroundColor: 'var(--bg-card-subtle)',
                       border: '1px solid var(--border-color)',
-                      borderRadius: 'var(--radius-sm)',
-                      fontSize: '0.85rem',
-                      color: 'var(--text-secondary)',
-                      marginBottom: '1.5rem',
                     }}
                   >
-                    All registered students are currently enrolled in this batch.
-                  </div>
-                ) : (
-                  <form onSubmit={handleEnrollStudent} style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.5rem' }}>
-                    <select
-                      className="form-select select-input"
-                      value={selectedStudentToEnroll}
-                      onChange={(e) => setSelectedStudentToEnroll(e.target.value)}
-                      style={{ flexGrow: 1 }}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                      <Avatar name={stu.full_name} size="xs" />
+                      <div>
+                        <div style={{ fontWeight: 700, fontSize: '0.875rem', color: 'var(--text-primary)' }}>
+                          {stu.full_name}
+                        </div>
+                        <div style={{ fontSize: '0.725rem', color: 'var(--text-muted)' }}>
+                          {stu.roll_number}
+                        </div>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleUnenrollStudent(stu.id)}
+                      title="Remove from batch"
+                      style={{
+                        background: 'transparent',
+                        border: 'none',
+                        color: 'var(--danger)',
+                        cursor: 'pointer',
+                        padding: '4px',
+                        display: 'flex',
+                        alignItems: 'center',
+                      }}
                     >
-                      {availableStudents.map((stu) => (
-                        <option key={stu.id} value={stu.id}>
-                          {stu.roll_number} - {stu.full_name}
-                        </option>
-                      ))}
-                    </select>
-                    <button type="submit" className="btn btn-primary" style={{ whiteSpace: 'nowrap' }}>
-                      <UserPlus size={16} /> Enroll Student
+                      <UserMinus size={15} />
                     </button>
-                  </form>
-                )}
-
-                {/* Enrolled Students List */}
-                <h4 style={{ fontSize: '0.9rem', fontWeight: 700, marginBottom: '0.75rem' }}>
-                  Currently Enrolled ({batchDetails?.enrolled_students?.length || 0})
-                </h4>
-
-                {batchDetails?.enrolled_students?.length === 0 ? (
-                  <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', textAlign: 'center', padding: '1rem' }}>
-                    No students currently enrolled in this batch.
-                  </p>
-                ) : (
-                  <div style={{ maxHeight: '220px', overflowY: 'auto', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-sm)' }}>
-                    <table className="data-table" style={{ fontSize: '0.85rem' }}>
-                      <tbody>
-                        {batchDetails?.enrolled_students?.map((stu) => (
-                          <tr key={stu.id}>
-                            <td style={{ fontWeight: 600 }}>{stu.roll_number}</td>
-                            <td>{stu.full_name}</td>
-                            <td style={{ textAlign: 'right' }}>
-                              <button
-                                onClick={() => handleUnenrollStudent(stu.id)}
-                                className="btn btn-danger btn-sm"
-                                title="Remove from batch"
-                                style={{ padding: '0.25rem 0.5rem' }}
-                              >
-                                <UserMinus size={14} /> Remove
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
                   </div>
-                )}
-              </div>
-
-              <div className="modal-footer">
-                <button
-                  type="button"
-                  onClick={() => setIsEnrollModalOpen(false)}
-                  className="btn btn-secondary"
-                >
-                  Close
-                </button>
-              </div>
+                ))
+              )}
             </div>
           </div>
-        );
-      })()}
+        </div>
+      </Modal>
 
-      {/* Past Attendance History & Session Inspector Modal */}
-      <SessionHistoryModal
-        isOpen={isHistoryModalOpen}
-        onClose={() => {
-          setIsHistoryModalOpen(false);
-          setHistoryBatch(null);
-        }}
-        batch={historyBatch}
-      />
+      {/* 5. SESSION HISTORY & AUDIT TRAIL MODAL */}
+      {historyBatch && (
+        <SessionHistoryModal
+          isOpen={isHistoryModalOpen}
+          onClose={() => {
+            setIsHistoryModalOpen(false);
+            setHistoryBatch(null);
+          }}
+          batch={historyBatch}
+        />
+      )}
     </div>
   );
 };

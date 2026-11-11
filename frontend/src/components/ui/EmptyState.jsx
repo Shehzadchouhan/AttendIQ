@@ -6,6 +6,8 @@ export const EmptyState = ({
   title = 'No items found',
   description = 'There is currently no data to display.',
   action,
+  actionLabel,
+  onAction,
   className = '',
   ...props
 }) => {
@@ -16,7 +18,19 @@ export const EmptyState = ({
       </div>
       <h4 className="ui-empty-state-title">{title}</h4>
       {description && <p className="ui-empty-state-description">{description}</p>}
-      {action && <div className="ui-empty-state-action">{action}</div>}
+      {(action || (actionLabel && onAction)) && (
+        <div className="ui-empty-state-action" style={{ marginTop: '0.85rem' }}>
+          {action || (
+            <button
+              type="button"
+              className="ui-btn ui-btn--primary ui-btn--sm"
+              onClick={onAction}
+            >
+              {actionLabel}
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 };

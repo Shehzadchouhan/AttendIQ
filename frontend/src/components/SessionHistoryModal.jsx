@@ -81,6 +81,7 @@ const SessionHistoryModal = ({ isOpen, onClose, batch }) => {
     };
 
     fetchSessions();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, batch]);
 
   // 2. Fetch full session details whenever selectedSessionId changes
@@ -106,6 +107,7 @@ const SessionHistoryModal = ({ isOpen, onClose, batch }) => {
 
     fetchSessionDetail();
     fetchAuditLogs(selectedSessionId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedSessionId]);
 
   const fetchAuditLogs = async (sessionId) => {

@@ -7,16 +7,28 @@ import {
   Camera,
   BarChart2,
   LogOut,
-  ShieldCheck,
+  MessageSquare,
   UserCheck,
   X,
-  Sparkles
+  ShieldCheck
 } from 'lucide-react';
+import { motion } from 'framer-motion';
 import { useAuth } from '../context/AuthContext';
 import { AttendIQLogo } from './AttendIQLogo';
+import ThemeToggle from './ui/ThemeToggle';
+
+const navItems = [
+  { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
+  { to: '/students', label: 'Students', icon: Users },
+  { to: '/batches', label: 'Batches', icon: BookOpen },
+  { to: '/attendance', label: 'Take Attendance', icon: Camera },
+  { to: '/reports', label: 'Reports', icon: BarChart2 },
+  { to: '/chat', label: 'Tutor Community', icon: MessageSquare },
+  { to: '/profile', label: 'My Profile', icon: UserCheck },
+];
 
 const Sidebar = ({ isMobileOpen = false, onClose = () => {} }) => {
-  const { user, isAdmin, logout } = useAuth();
+  const { user, logout } = useAuth();
   const navigate = useNavigate();
 
   const handleLogout = () => {
@@ -26,6 +38,11 @@ const Sidebar = ({ isMobileOpen = false, onClose = () => {} }) => {
   };
 
   const handleNavClick = () => {
+    if (onClose) onClose();
+  };
+
+  const handleProfileClick = () => {
+    navigate('/profile');
     if (onClose) onClose();
   };
 
@@ -40,8 +57,8 @@ const Sidebar = ({ isMobileOpen = false, onClose = () => {} }) => {
 
       <aside className={`sidebar ${isMobileOpen ? 'mobile-open' : ''}`}>
         {/* Brand Header */}
-        <div className="sidebar-header" style={{ justifyContent: 'space-between' }}>
-          <AttendIQLogo size={36} subtitle="Smart Attendance" />
+        <div className="sidebar-header">
+          <AttendIQLogo size={34} subtitle="AI Biometrics" />
           {/* Mobile Close Button */}
           <button
             type="button"
@@ -55,76 +72,72 @@ const Sidebar = ({ isMobileOpen = false, onClose = () => {} }) => {
 
         {/* Main Navigation */}
         <nav className="sidebar-nav">
-          <NavLink
-            to="/"
-            end
-            onClick={handleNavClick}
-            className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
-          >
-            <LayoutDashboard size={19} />
-            <span>Dashboard</span>
-          </NavLink>
-
-          <NavLink
-            to="/students"
-            onClick={handleNavClick}
-            className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
-          >
-            <Users size={19} />
-            <span>Students</span>
-          </NavLink>
-
-          <NavLink
-            to="/batches"
-            onClick={handleNavClick}
-            className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
-          >
-            <BookOpen size={19} />
-            <span>Batches</span>
-          </NavLink>
-
-          <NavLink
-            to="/attendance"
-            onClick={handleNavClick}
-            className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
-          >
-            <Camera size={19} />
-            <span>Take Attendance</span>
-          </NavLink>
-
-          <NavLink
-            to="/reports"
-            onClick={handleNavClick}
-            className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
-          >
-            <BarChart2 size={19} />
-            <span>Reports</span>
-          </NavLink>
+          {navItems.map((item) => {
+            const Icon = item.icon;
+            return (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                end={item.end}
+                onClick={handleNavClick}
+                className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
+              >
+                {({ isActive }) => (
+                  <>
+                    <Icon size={19} />
+                    <span>{item.label}</span>
+                    {isActive && (
+                      <motion.div
+                        layoutId="activeSidebarPill"
+                        className="nav-active-pill"
+                        transition={{ type: 'spring', stiffness: 380, damping: 30 }}
+                      />
+                    )}
+                  </>
+                )}
+              </NavLink>
+            );
+          })}
         </nav>
 
         {/* System Online Pill indicator */}
         <div className="sidebar-system-status">
           <div className="pulse-dot-green" />
-          <span>AI Face Engine Online</span>
+          <span>AttendIQ Tutor Network</span>
         </div>
 
         {/* Authenticated User Profile Badge & Logout */}
         <div className="sidebar-footer">
           <div className="user-badge">
-            <div className="user-info">
-              <span className="user-name">{user?.name || 'User'}</span>
-              <span className={`user-role-pill ${isAdmin ? 'role-admin' : 'role-teacher'}`}>
-                {isAdmin ? 'Admin' : 'Faculty'}
-              </span>
-            </div>
-            <button
-              onClick={handleLogout}
-              className="btn-logout"
-              title="Sign Out"
-              aria-label="Sign Out"
+            <div
+              style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', minWidth: 0, cursor: 'pointer' }}
+              onClick={handleProfileClick}
+              title="Open My Profile"
             >
-              <LogOut size={18} />
-            </button>
+              <div className="navbar-avatar" style={{ width: '32px', height: '32px', fontSize: '0.8rem' }}>
+                {(user?.name || user?.email || 'U').charAt(0).toUpperCase()}
+              </div>
+              <div className="user-info" style={{ minWidth: 0 }}>
+                <span className="user-name" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {user?.name || user?.email || 'User'}
+                </span>
+                <span className="user-role-pill role-teacher" style={{ alignSelf: 'flex-start', marginTop: '2px' }}>
+                  <ShieldCheck size={10} style={{ marginRight: '2px' }} />
+                  Verified Tutor
+                </span>
+              </div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexShrink: 0 }}>
+              <ThemeToggle size="sm" showLabel={false} />
+              <button
+                onClick={handleLogout}
+                className="btn-logout"
+                title="Sign Out"
+                aria-label="Sign Out"
+              >
+                <LogOut size={17} />
+              </button>
+            </div>
           </div>
         </div>
       </aside>

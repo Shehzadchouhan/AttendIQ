@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
+import confetti from 'canvas-confetti';
 import {
   Camera,
   Upload,
@@ -18,12 +19,64 @@ import {
   Smartphone,
   CheckCheck,
   Shuffle,
-  CheckSquare
+  CheckSquare,
+  Sparkles,
+  Zap,
+  ShieldCheck,
+  Share2,
+  Lock
 } from 'lucide-react';
 import apiClient from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import WebcamModal from '../components/WebcamModal';
+import Card from '../components/ui/Card';
+import Badge from '../components/ui/Badge';
+import Button from '../components/ui/Button';
+import Avatar from '../components/ui/Avatar';
+
+// Radial Attendance Ring Component
+const AttendanceRing = ({ percentage = 0, size = 70, strokeWidth = 6 }) => {
+  const radius = (size - strokeWidth) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const strokeDashoffset = circumference - (percentage / 100) * circumference;
+
+  let strokeColor = '#10b981';
+  if (percentage < 60) strokeColor = '#ef4444';
+  else if (percentage < 75) strokeColor = '#f59e0b';
+
+  return (
+    <div style={{ position: 'relative', width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+      <svg width={size} height={size} style={{ transform: 'rotate(-90deg)' }}>
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          stroke="var(--border-color)"
+          strokeWidth={strokeWidth}
+          fill="none"
+        />
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          stroke={strokeColor}
+          strokeWidth={strokeWidth}
+          fill="none"
+          strokeDasharray={circumference}
+          strokeDashoffset={strokeDashoffset}
+          strokeLinecap="round"
+          style={{ transition: 'stroke-dashoffset 0.5s ease' }}
+        />
+      </svg>
+      <div style={{ position: 'absolute', textAlign: 'center', lineHeight: 1 }}>
+        <span style={{ fontSize: '0.85rem', fontWeight: 800, color: 'var(--text-primary)' }}>
+          {percentage}%
+        </span>
+      </div>
+    </div>
+  );
+};
 
 const TakeAttendance = () => {
   const { user, isAdmin } = useAuth();
@@ -43,9 +96,8 @@ const TakeAttendance = () => {
   const [recognitionResult, setRecognitionResult] = useState(null);
 
   // Student Attendance Roster State
-  // Array of { student_id, roll_number, full_name, status: 'present'|'absent'|'late', method: 'face'|'manual', confidence_score, face_index }
   const [roster, setRoster] = useState([]);
-  const [unassignedFaces, setUnassignedFaces] = useState([]); // Array of { index, bbox, det_score }
+  const [unassignedFaces, setUnassignedFaces] = useState([]);
   const [loadingBatchStudents, setLoadingBatchStudents] = useState(false);
 
   // Submission & Feedback State
@@ -53,6 +105,9 @@ const TakeAttendance = () => {
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
   const [createdSessionId, setCreatedSessionId] = useState(null);
+
+  // Stepper state: 1 (Config), 2 (Capture), 3 (Review), 4 (Confirmed)
+  const currentStep = successMsg ? 4 : recognitionResult || roster.length > 0 ? 3 : photoUrl ? 2 : 1;
 
   // Canvas & Input Refs
   const canvasRef = useRef(null);
@@ -62,13 +117,13 @@ const TakeAttendance = () => {
   // Live Camera Stream Modal State
   const [isCameraModalOpen, setIsCameraModalOpen] = useState(false);
 
-  // 1. Fetch available batches on mount (Admins see all, Teachers see assigned)
+  // 1. Fetch available batches on mount
   useEffect(() => {
     const fetchBatches = async () => {
       try {
         const res = await apiClient.get(isAdmin ? '/batches/?scope=all' : '/batches/');
-        setBatches(res.data);
-        if (res.data.length > 0) {
+        setBatches(res.data || []);
+        if (res.data?.length > 0) {
           setSelectedBatchId(res.data[0].id.toString());
         }
       } catch (err) {
@@ -89,7 +144,6 @@ const TakeAttendance = () => {
         const res = await apiClient.get(`/batches/${selectedBatchId}`);
         const enrolled = res.data.enrolled_students || [];
 
-        // In manual mode, pre-fill all enrolled students
         if (mode === 'manual') {
           const initialRoster = enrolled.map((stu) => ({
             student_id: stu.id,
@@ -125,13 +179,32 @@ const TakeAttendance = () => {
     setSuccessMsg('');
     setPhotoFile(file);
 
-    // Create browser-only Object URL (Zero server-side disk write)
     const localUrl = URL.createObjectURL(file);
     setPhotoUrl(localUrl);
     setRecognitionResult(null);
   };
 
-  // Handle Camera Capture from Live Webcam / Mobile Stream
+  // Handle Loading Demo Classroom Photo for Viva/Presentation
+  const handleLoadDemoPhoto = async () => {
+    try {
+      setRecognizing(true);
+      setErrorMsg('');
+      setSuccessMsg('');
+      const response = await fetch('/demo_classroom.png');
+      const blob = await response.blob();
+      const file = new File([blob], 'demo_classroom.png', { type: 'image/png' });
+      setPhotoFile(file);
+      setPhotoUrl(URL.createObjectURL(blob));
+      setRecognitionResult(null);
+      toast.info('Demo classroom photo loaded! Analyzing faces...');
+      await handleRunRecognition(file);
+    } catch (err) {
+      toast.error('Could not load demo classroom photo.');
+      setRecognizing(false);
+    }
+  };
+
+  // Handle Camera Capture
   const handleCameraCapture = (file, previewUrl) => {
     setErrorMsg('');
     setSuccessMsg('');
@@ -158,12 +231,10 @@ const TakeAttendance = () => {
     formData.append('file', fileToUse);
 
     try {
-      // 1. Fetch batch detail for student names
       const batchRes = await apiClient.get(`/batches/${selectedBatchId}`);
       const enrolled = batchRes.data.enrolled_students || [];
       const studentMap = new Map(enrolled.map((s) => [s.id, s]));
 
-      // 2. Call face recognition endpoint
       const res = await apiClient.post('/attendance/recognize', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
@@ -171,11 +242,9 @@ const TakeAttendance = () => {
       const data = res.data;
       setRecognitionResult(data);
 
-      // Build initial roster
       const recognizedStudentIds = new Set();
       const newRoster = [];
 
-      // Add detected faces that matched a student
       data.faces.forEach((face, idx) => {
         if (face.student_id && studentMap.has(face.student_id)) {
           const stu = studentMap.get(face.student_id);
@@ -193,7 +262,6 @@ const TakeAttendance = () => {
         }
       });
 
-      // Add absent enrolled students
       enrolled.forEach((stu) => {
         if (!recognizedStudentIds.has(stu.id)) {
           newRoster.push({
@@ -209,11 +277,9 @@ const TakeAttendance = () => {
         }
       });
 
-      // Sort roster by roll number
       newRoster.sort((a, b) => a.roll_number.localeCompare(b.roll_number));
       setRoster(newRoster);
 
-      // Extract unassigned / unknown faces for manual teacher assignment
       const unknowns = data.faces
         .map((f, idx) => ({ ...f, index: idx }))
         .filter((f) => f.status === 'unknown' || !f.student_id);
@@ -238,7 +304,6 @@ const TakeAttendance = () => {
     const img = imageRef.current;
 
     const drawBoxes = () => {
-      // Set canvas coordinate space to displayed image size
       canvas.width = img.clientWidth;
       canvas.height = img.clientHeight;
 
@@ -254,8 +319,8 @@ const TakeAttendance = () => {
         const boxW = (x2 - x1) * scaleX;
         const boxH = (y2 - y1) * scaleY;
 
-        let strokeColor = '#22c55e'; // Green for matched
-        let fillColor = 'rgba(34, 197, 94, 0.15)';
+        let strokeColor = '#10b981'; // Green for matched
+        let fillColor = 'rgba(16, 185, 129, 0.15)';
         let labelText = `${face.student_name || 'Matched'} (${Math.round(face.score * 100)}%)`;
 
         if (face.status === 'review') {
@@ -268,18 +333,17 @@ const TakeAttendance = () => {
           if (face.score > 0 && face.student_name) {
             labelText = `Unknown (${face.student_name} ${Math.round(face.score * 100)}%)`;
           } else {
-            labelText = `Unknown Face #${idx + 1}`;
+            labelText = `Unknown #${idx + 1}`;
           }
         }
 
-        // Draw Bounding Box Rectangle
         ctx.strokeStyle = strokeColor;
         ctx.lineWidth = 3;
         ctx.strokeRect(boxX, boxY, boxW, boxH);
         ctx.fillStyle = fillColor;
         ctx.fillRect(boxX, boxY, boxW, boxH);
 
-        // Draw Label Tag
+        // Label Tag
         ctx.font = 'bold 12px sans-serif';
         const textWidth = ctx.measureText(labelText).width;
         ctx.fillStyle = strokeColor;
@@ -315,7 +379,7 @@ const TakeAttendance = () => {
     );
   };
 
-  // Bulk Roster Controls (Step 3)
+  // Bulk Controls
   const handleMarkAllPresent = () => {
     if (!roster.length) return;
     setRoster((prev) =>
@@ -343,28 +407,19 @@ const TakeAttendance = () => {
   const handleInvertSelection = () => {
     if (!roster.length) return;
     setRoster((prev) =>
-      prev.map((r) => {
-        let newStatus = 'absent';
-        if (r.status === 'absent') {
-          newStatus = 'present';
-        } else {
-          newStatus = 'absent';
-        }
-        return {
-          ...r,
-          status: newStatus,
-          review_flag: false,
-        };
-      })
+      prev.map((r) => ({
+        ...r,
+        status: r.status === 'absent' ? 'present' : 'absent',
+        review_flag: false,
+      }))
     );
     toast.warning(`Inverted attendance selection for ${roster.length} students.`);
   };
 
-  // 7. Assign an Unknown Face to an Absent Student
+  // Assign an Unknown Face to an Absent Student
   const handleAssignUnknownFace = (faceIndex, studentId) => {
     if (!studentId) return;
 
-    // Mark that student as present (method: manual / teacher assigned)
     setRoster((prev) =>
       prev.map((item) =>
         item.student_id === parseInt(studentId)
@@ -373,11 +428,11 @@ const TakeAttendance = () => {
       )
     );
 
-    // Remove from unassigned faces list
     setUnassignedFaces((prev) => prev.filter((f) => f.index !== faceIndex));
+    toast.success('Assigned face to student.');
   };
 
-  // 8. Confirm and Save Attendance Session
+  // 8. Confirm and Save Attendance Session with Confetti Celebration
   const handleConfirmAndSave = async () => {
     if (!selectedBatchId || !roster.length) {
       setErrorMsg('No students in batch to record attendance.');
@@ -389,7 +444,6 @@ const TakeAttendance = () => {
     setSuccessMsg('');
 
     try {
-      // 1. Create session (or retrieve if one already exists for batch and date)
       let sessionId = createdSessionId;
 
       if (!sessionId) {
@@ -400,7 +454,6 @@ const TakeAttendance = () => {
           });
           sessionId = createRes.data.id;
         } catch (createErr) {
-          // If session already exists on this date, fetch existing session ID
           if (createErr.response?.status === 409) {
             const listRes = await apiClient.get(
               `/attendance/sessions?batch_id=${selectedBatchId}&from_date=${sessionDate}&to_date=${sessionDate}`
@@ -418,7 +471,6 @@ const TakeAttendance = () => {
 
       setCreatedSessionId(sessionId);
 
-      // 2. Prepare confirmation payload
       const confirmPayload = {
         records: roster.map((r) => ({
           student_id: r.student_id,
@@ -429,14 +481,24 @@ const TakeAttendance = () => {
         unrecognized_count: unassignedFaces.length,
       };
 
-      // 3. Post confirmation
       await apiClient.post(`/attendance/sessions/${sessionId}/confirm`, confirmPayload);
 
       const pCount = roster.filter((r) => r.status === 'present').length;
       const aCount = roster.filter((r) => r.status === 'absent').length;
-      const msg = `Attendance confirmed successfully! ${pCount} present, ${aCount} absent.`;
+      const msg = `Attendance confirmed! ${pCount} present, ${aCount} absent. Session logged & locked.`;
       setSuccessMsg(msg);
       toast.success(msg);
+
+      // Trigger Confetti Celebration!
+      try {
+        confetti({
+          particleCount: 70,
+          spread: 60,
+          origin: { y: 0.65 },
+        });
+      } catch (err) {
+        // ignore confetti failures gracefully
+      }
     } catch (err) {
       const errorText = err.response?.data?.detail || 'Failed to confirm attendance. Please try again.';
       setErrorMsg(errorText);
@@ -446,72 +508,154 @@ const TakeAttendance = () => {
     }
   };
 
-  // Aggregated Counts
+  // Aggregated Counts & Percentages
   const presentCount = roster.filter((r) => r.status === 'present').length;
   const absentCount = roster.filter((r) => r.status === 'absent').length;
   const lateCount = roster.filter((r) => r.status === 'late').length;
   const reviewCount = roster.filter((r) => r.review_flag).length;
+  const totalCount = roster.length;
+  const attendanceRate = totalCount > 0 ? Math.round((presentCount / totalCount) * 100) : 0;
 
-  // Real-world value add: 1-Click WhatsApp & SMS absentee update generator for faculty
+  // WhatsApp Broadcast Generator
   const handleShareWhatsAppBroadcast = () => {
     const curBatch = batches.find((b) => b.id.toString() === selectedBatchId);
     const batchName = curBatch ? `${curBatch.name} (${curBatch.subject})` : 'Class Batch';
     const presentStudents = roster.filter((r) => r.status === 'present');
     const absentStudents = roster.filter((r) => r.status === 'absent');
-    const lateStudents = roster.filter((r) => r.status === 'late');
-    const total = roster.length;
-    const rate = total > 0 ? Math.round((presentStudents.length / total) * 100) : 0;
 
-    let msg = `📢 *AttendIQ Attendance Broadcast*\n`;
+    let msg = `📢 *AttendIQ Attendance Summary*\n`;
     msg += `🏫 *Batch:* ${batchName}\n`;
     msg += `📅 *Date:* ${sessionDate}\n`;
-    msg += `👨‍🏫 *Faculty:* ${user?.name || 'Faculty Member'}\n`;
-    msg += `📊 *Attendance:* ${rate}% (${presentStudents.length} Present / ${absentStudents.length} Absent)\n`;
+    msg += `👨‍🏫 *Faculty:* ${user?.name || 'Tutor'}\n`;
+    msg += `📊 *Attendance:* ${attendanceRate}% (${presentStudents.length} Present / ${absentStudents.length} Absent)\n`;
 
     if (absentStudents.length > 0) {
-      msg += `\n❌ *ABSENT STUDENTS (${absentStudents.length}) - Parent Notification Required:*\n`;
+      msg += `\n❌ *ABSENT STUDENTS (${absentStudents.length}):*\n`;
       absentStudents.forEach((s) => {
         msg += `• ${s.roll_number} — ${s.full_name}\n`;
       });
     } else {
-      msg += `\n✨ *100% Attendance — Full class present today!*\n`;
+      msg += `\n✨ *100% Attendance — Full attendance today!*\n`;
     }
 
-    if (lateStudents.length > 0) {
-      msg += `\n⏰ *Late Arrivals (${lateStudents.length}):*\n`;
-      lateStudents.forEach((s) => {
-        msg += `• ${s.roll_number} — ${s.full_name}\n`;
-      });
-    }
-
-    msg += `\nVerified via AttendIQ Smart Attendance Engine.`;
+    msg += `\nVerified via FaceMark / AttendIQ AI Biometric Suite.`;
 
     if (navigator.clipboard) {
       navigator.clipboard.writeText(msg);
-      toast.success('WhatsApp absentee update copied to clipboard! Ready to paste into class group.');
-    } else {
-      toast.info('Attendance summary prepared.');
+      toast.success('WhatsApp absentee broadcast copied to clipboard!');
     }
   };
 
   return (
-    <div className="attendance-page">
-      {/* Page Header */}
-      <div className="page-header">
+    <div className="page-container" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+      {/* 1. HEADER ROW WITH TITLE */}
+      <div
+        className="page-header"
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: '1rem',
+        }}
+      >
         <div>
-          <h1 className="page-title">Take Attendance</h1>
-          <p className="page-subtitle">
-            Capture or upload a class photo for instant AI face recognition, or record attendance manually.
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.2rem' }}>
+            <h1 className="page-title" style={{ fontSize: '1.75rem', fontWeight: 800, margin: 0 }}>
+              Take Attendance
+            </h1>
+            <Badge variant="primary" size="sm">
+              <Zap size={12} style={{ marginRight: '3px' }} /> AI Biometrics
+            </Badge>
+          </div>
+          <p className="page-subtitle" style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', margin: 0 }}>
+            Multi-face recognition engine detects all classroom faces in under 3 seconds.
           </p>
+        </div>
+
+        {/* Mode Toggle Button */}
+        <div className="ui-theme-segmented">
+          <button
+            type="button"
+            className={`ui-theme-segmented-btn ${mode === 'face' ? 'active' : ''}`}
+            onClick={() => setMode('face')}
+          >
+            <Camera size={14} /> AI Face Scan
+          </button>
+          <button
+            type="button"
+            className={`ui-theme-segmented-btn ${mode === 'manual' ? 'active' : ''}`}
+            onClick={() => setMode('manual')}
+          >
+            <Users size={14} /> Manual Roll Call
+          </button>
         </div>
       </div>
 
-      {/* Control Bar: Batch, Date, and Mode Selectors */}
-      <div className="card control-card">
-        <div className="control-row">
-          <div className="control-group">
-            <label>
-              <Users size={16} /> Batch
+      {/* 2. FOUR-STEP SIGNATURE STEPPER */}
+      <Card style={{ padding: '1rem 1.25rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', overflowX: 'auto' }}>
+          {[
+            { step: 1, label: 'Select Batch' },
+            { step: 2, label: 'Capture Photo' },
+            { step: 3, label: 'AI Review' },
+            { step: 4, label: 'Lock Session' },
+          ].map((s, idx) => {
+            const isCompleted = currentStep > s.step;
+            const isCurrent = currentStep === s.step;
+            return (
+              <React.Fragment key={s.step}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', whiteSpace: 'nowrap' }}>
+                  <div
+                    style={{
+                      width: '26px',
+                      height: '26px',
+                      borderRadius: '50%',
+                      backgroundColor: isCurrent ? 'var(--primary)' : isCompleted ? 'var(--success)' : 'var(--bg-card-subtle)',
+                      color: isCurrent || isCompleted ? '#ffffff' : 'var(--text-muted)',
+                      border: '1px solid',
+                      borderColor: isCurrent ? 'var(--primary)' : isCompleted ? 'var(--success)' : 'var(--border-color)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: '0.75rem',
+                      fontWeight: 700,
+                    }}
+                  >
+                    {isCompleted ? <CheckCheck size={14} /> : s.step}
+                  </div>
+                  <span
+                    style={{
+                      fontSize: '0.8rem',
+                      fontWeight: isCurrent ? 700 : 500,
+                      color: isCurrent ? 'var(--text-primary)' : 'var(--text-secondary)',
+                    }}
+                  >
+                    {s.label}
+                  </span>
+                </div>
+                {idx < 3 && (
+                  <div
+                    style={{
+                      flex: 1,
+                      minWidth: '24px',
+                      height: '2px',
+                      backgroundColor: isCompleted ? 'var(--success)' : 'var(--border-color)',
+                    }}
+                  />
+                )}
+              </React.Fragment>
+            );
+          })}
+        </div>
+      </Card>
+
+      {/* 3. CONTROL CARD: BATCH & DATE SELECTOR */}
+      <Card style={{ padding: '1.25rem' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem', alignItems: 'center' }}>
+          <div className="form-group" style={{ margin: 0 }}>
+            <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <Users size={14} style={{ color: 'var(--primary)' }} /> Academic Batch
             </label>
             <select
               value={selectedBatchId}
@@ -520,7 +664,7 @@ const TakeAttendance = () => {
                 setCreatedSessionId(null);
                 setSuccessMsg('');
               }}
-              className="select-input"
+              className="form-input"
             >
               {batches.map((b) => (
                 <option key={b.id} value={b.id}>
@@ -530,9 +674,9 @@ const TakeAttendance = () => {
             </select>
           </div>
 
-          <div className="control-group">
-            <label>
-              <Calendar size={16} /> Session Date
+          <div className="form-group" style={{ margin: 0 }}>
+            <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <Calendar size={14} style={{ color: 'var(--primary)' }} /> Session Date
             </label>
             <input
               type="date"
@@ -542,145 +686,122 @@ const TakeAttendance = () => {
                 setCreatedSessionId(null);
                 setSuccessMsg('');
               }}
-              className="date-input"
+              className="form-input"
             />
           </div>
 
-          <div className="control-group">
-            <label>
-              <Layers size={16} /> Mode
-            </label>
-            <div className="mode-toggle">
-              <button
-                type="button"
-                className={`mode-btn ${mode === 'face' ? 'active' : ''}`}
-                onClick={() => setMode('face')}
-              >
-                <Camera size={16} /> Face Recognition
-              </button>
-              <button
-                type="button"
-                className={`mode-btn ${mode === 'manual' ? 'active' : ''}`}
-                onClick={() => setMode('manual')}
-              >
-                <Users size={16} /> Manual Roster
-              </button>
+          {/* Quick Stats Pill */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', justifyContent: 'flex-end' }}>
+            <AttendanceRing percentage={attendanceRate} size={54} strokeWidth={5} />
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600 }}>ROSTER COUNT</span>
+              <span style={{ fontSize: '1rem', fontWeight: 800, color: 'var(--text-primary)' }}>
+                {presentCount} / {totalCount} Present
+              </span>
             </div>
           </div>
         </div>
-      </div>
+      </Card>
 
-      {/* Feedback Messages */}
+      {/* Feedback Alert Banners */}
       {errorMsg && (
-        <div className="alert alert-error">
-          <AlertTriangle size={18} />
+        <div style={{ padding: '0.85rem 1rem', backgroundColor: 'var(--danger-light)', border: '1px solid var(--danger-border)', color: 'var(--danger)', borderRadius: 'var(--radius-sm)', display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem' }}>
+          <AlertTriangle size={16} style={{ flexShrink: 0 }} />
           <span>{errorMsg}</span>
         </div>
       )}
 
       {successMsg && (
-        <div className="alert alert-success">
-          <CheckCircle2 size={18} />
-          <div style={{ flex: 1 }}>
-            <span>{successMsg}</span>
+        <div style={{ padding: '1rem', backgroundColor: 'var(--success-light)', border: '1px solid var(--success-border)', color: 'var(--success)', borderRadius: 'var(--radius-md)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <CheckCircle2 size={20} />
+            <span style={{ fontWeight: 700, fontSize: '0.9rem' }}>{successMsg}</span>
           </div>
-          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: '0.5rem' }}>
             <button
               type="button"
               onClick={handleShareWhatsAppBroadcast}
-              className="btn btn-sm btn-secondary"
-              style={{
-                gap: '0.4rem',
-                backgroundColor: '#ecfdf5',
-                borderColor: '#a7f3d0',
-                color: '#065f46',
-                fontWeight: 600,
-              }}
-              title="Copy formatted WhatsApp absentee alert to clipboard for parents and batch group"
+              className="btn btn-sm"
+              style={{ backgroundColor: '#25D366', color: '#fff', border: 'none', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '4px' }}
             >
-              <Smartphone size={14} color="#059669" /> Copy WhatsApp Update
+              <Smartphone size={14} /> WhatsApp Broadcast
             </button>
             <button
+              type="button"
               onClick={() => navigate(`/reports?batch_id=${selectedBatchId}`)}
               className="btn btn-sm btn-secondary"
             >
-              View Reports <ArrowRight size={14} />
+              View Analytics <ArrowRight size={14} />
             </button>
           </div>
         </div>
       )}
 
-      {/* No Enrolled Biometrics Guidance Banner */}
-      {recognitionResult &&
-        recognitionResult.faces.length > 0 &&
-        recognitionResult.faces.every((f) => f.score === 0) && (
-          <div className="alert alert-warning" style={{ marginBottom: '1.25rem' }}>
-            <AlertTriangle size={20} />
-            <div style={{ flex: 1 }}>
-              <strong>No Reference Face Photos Enrolled in This Batch</strong>
-              <p className="text-sm" style={{ marginTop: '0.25rem' }}>
-                {recognitionResult.faces.length} face(s) were detected in your photo, but none of the students in this batch have enrolled face portraits yet (similarity score: 0%).
-              </p>
-              <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                <button
-                  onClick={() => navigate('/students')}
-                  className="btn btn-sm btn-primary"
-                >
-                  Go to Students to Enroll Faces <ArrowRight size={14} />
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-      {/* Main Content Workspace: Left (Media/Canvas) | Right (Roster & Review) */}
-      <div className="attendance-workspace">
-        {/* Left Column: Camera / Canvas Section */}
+      {/* 4. WORKSPACE: LEFT (CAMERA/IMAGE/SCANNING) & RIGHT (ROSTER & CONFIRM) */}
+      <div style={{ display: 'grid', gridTemplateColumns: mode === 'face' ? '1.15fr 1fr' : '1fr', gap: '1.25rem' }}>
+        {/* LEFT COLUMN: CAMERA / SCANNING CANVAS */}
         {mode === 'face' && (
-          <div className="workspace-left card">
-            <div className="section-header">
-              <h3>Classroom Photograph</h3>
-              {photoFile && (
+          <Card style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+              <div>
+                <h3 style={{ fontSize: '1.05rem', fontWeight: 700, margin: 0, color: 'var(--text-primary)' }}>
+                  Classroom Biometric Frame
+                </h3>
+                <span style={{ fontSize: '0.785rem', color: 'var(--text-muted)' }}>
+                  Captured in-memory; no raw student images are stored to disk.
+                </span>
+              </div>
+
+              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
                 <button
-                  onClick={handleRunRecognition}
-                  disabled={recognizing}
-                  className="btn btn-primary btn-sm"
+                  type="button"
+                  onClick={handleLoadDemoPhoto}
+                  className="btn btn-secondary btn-sm"
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '0.785rem', fontWeight: 600 }}
+                  title="Load the 5-student sample photo for live viva demonstration"
                 >
-                  {recognizing ? (
-                    <>
-                      <RefreshCw size={14} className="spin" /> Analyzing Faces...
-                    </>
-                  ) : (
-                    <>
-                      <Camera size={14} /> Run Recognition
-                    </>
-                  )}
+                  <Sparkles size={13} style={{ color: 'var(--primary)' }} /> Demo Sample
                 </button>
-              )}
+                {photoFile && (
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    onClick={() => handleRunRecognition()}
+                    disabled={recognizing}
+                  >
+                    {recognizing ? (
+                      <>
+                        <RefreshCw size={13} className="spin" /> Scanning...
+                      </>
+                    ) : (
+                      <>
+                        <Camera size={13} /> Run Recognition
+                      </>
+                    )}
+                  </Button>
+                )}
+              </div>
             </div>
 
             {!photoUrl ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
-                {/* Instant Camera Capture Options */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', flex: 1, justifyContent: 'center' }}>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-                  <button
-                    type="button"
+                  <Button
+                    variant="primary"
+                    size="md"
                     onClick={() => setIsCameraModalOpen(true)}
-                    className="btn btn-primary"
-                    style={{ justifyContent: 'center', padding: '0.85rem', gap: '0.5rem', fontWeight: 700 }}
+                    style={{ padding: '1rem' }}
                   >
-                    <Camera size={18} /> Camera Stream
-                  </button>
-
-                  <button
-                    type="button"
+                    <Camera size={18} /> Live Webcam Stream
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="md"
                     onClick={() => mobileInputRef.current?.click()}
-                    className="btn btn-secondary"
-                    style={{ justifyContent: 'center', padding: '0.85rem', gap: '0.5rem', fontWeight: 600 }}
-                    title="Capture directly with smartphone camera"
+                    style={{ padding: '1rem' }}
                   >
                     <Smartphone size={18} /> Mobile Camera
-                  </button>
+                  </Button>
                   <input
                     ref={mobileInputRef}
                     type="file"
@@ -691,361 +812,370 @@ const TakeAttendance = () => {
                   />
                 </div>
 
-                <label className="upload-dropzone" style={{ margin: 0, padding: '2rem 1rem' }}>
+                <label
+                  style={{
+                    border: '2px dashed var(--border-color)',
+                    borderRadius: 'var(--radius-lg)',
+                    padding: '2.5rem 1.5rem',
+                    textAlign: 'center',
+                    cursor: 'pointer',
+                    backgroundColor: 'var(--bg-card-subtle)',
+                    transition: 'all var(--transition-fast)',
+                    display: 'block',
+                  }}
+                >
                   <input
                     type="file"
                     accept="image/jpeg,image/png,image/jpg"
                     onChange={handlePhotoSelect}
                     style={{ display: 'none' }}
                   />
-                  <Upload size={36} className="upload-icon" />
-                  <p className="upload-title">Or Browse / Drop Classroom Photo</p>
-                  <p className="upload-subtitle">
-                    Supports JPG and PNG up to 10MB. Photo is processed strictly in memory.
+                  <Upload size={36} style={{ color: 'var(--primary)', margin: '0 auto 0.75rem' }} />
+                  <div style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--text-primary)' }}>
+                    Or Upload Classroom Group Photograph
+                  </div>
+                  <p style={{ fontSize: '0.785rem', color: 'var(--text-secondary)', margin: '0.35rem 0 0 0' }}>
+                    Supports high-resolution multi-student classroom captures up to 10MB.
                   </p>
                 </label>
+
+                {/* 1-Click Demo Sample Button for Viva / Presentation */}
+                <button
+                  type="button"
+                  onClick={handleLoadDemoPhoto}
+                  className="btn"
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '8px',
+                    background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.12) 0%, rgba(139, 92, 246, 0.12) 100%)',
+                    color: 'var(--primary)',
+                    border: '1.5px dashed var(--primary)',
+                    fontWeight: 700,
+                    padding: '0.85rem 1rem',
+                    borderRadius: 'var(--radius-md)',
+                    cursor: 'pointer',
+                    width: '100%',
+                    fontSize: '0.875rem',
+                    transition: 'all var(--transition-fast)',
+                  }}
+                >
+                  <Sparkles size={16} /> ⚡ 1-Click Load College Demo Classroom Photo
+                </button>
               </div>
             ) : (
-              <div className="canvas-wrapper">
+              <div style={{ position: 'relative', width: '100%', borderRadius: 'var(--radius-md)', overflow: 'hidden', border: '1px solid var(--border-color)' }}>
                 <img
                   ref={imageRef}
                   src={photoUrl}
-                  alt="Classroom"
-                  className="classroom-image"
+                  alt="Classroom Snapshot"
+                  style={{ width: '100%', display: 'block', maxHeight: '420px', objectFit: 'contain', backgroundColor: '#000' }}
                 />
-                <canvas ref={canvasRef} className="bounding-box-canvas" />
+                <canvas
+                  ref={canvasRef}
+                  style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none' }}
+                />
 
-                <div className="canvas-actions" style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                  <button
-                    type="button"
-                    onClick={() => setIsCameraModalOpen(true)}
-                    className="btn btn-secondary btn-sm"
+                {/* Animated Laser Scanning Line during Recognition */}
+                {recognizing && (
+                  <div
+                    style={{
+                      position: 'absolute',
+                      left: 0,
+                      right: 0,
+                      height: '3px',
+                      background: 'linear-gradient(90deg, transparent, #22d3ee, #6366f1, transparent)',
+                      boxShadow: '0 0 15px 3px #22d3ee',
+                      animation: 'scanLaser 2.5s ease-in-out infinite alternate',
+                    }}
+                  />
+                )}
+
+                {/* Scanning overlay chip */}
+                {recognizing && (
+                  <div
+                    style={{
+                      position: 'absolute',
+                      top: '12px',
+                      left: '12px',
+                      background: 'rgba(11, 16, 32, 0.85)',
+                      backdropFilter: 'blur(8px)',
+                      border: '1px solid rgba(34, 211, 238, 0.4)',
+                      padding: '6px 12px',
+                      borderRadius: 'var(--radius-sm)',
+                      color: '#38bdf8',
+                      fontSize: '0.785rem',
+                      fontWeight: 700,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                    }}
                   >
-                    <Camera size={14} /> Retake with Camera
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => mobileInputRef.current?.click()}
-                    className="btn btn-secondary btn-sm"
-                  >
-                    <Smartphone size={14} /> Mobile Cam
-                  </button>
-                  <label className="btn btn-secondary btn-sm">
-                    <RefreshCw size={14} /> Upload File
-                    <input
-                      type="file"
-                      accept="image/jpeg,image/png,image/jpg"
-                      onChange={handlePhotoSelect}
-                      style={{ display: 'none' }}
-                    />
+                    <RefreshCw size={12} className="spin" />
+                    <span>Extracting Multi-Face Embeddings...</span>
+                  </div>
+                )}
+
+                {/* Retake actions strip */}
+                <div style={{ padding: '0.65rem 0.85rem', backgroundColor: 'var(--bg-card)', borderTop: '1px solid var(--border-color)', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                  <Button variant="secondary" size="sm" onClick={() => setIsCameraModalOpen(true)}>
+                    <Camera size={13} /> Retake
+                  </Button>
+                  <label className="btn btn-secondary btn-sm" style={{ cursor: 'pointer' }}>
+                    <Upload size={13} /> Change Photo
+                    <input type="file" accept="image/*" onChange={handlePhotoSelect} style={{ display: 'none' }} />
                   </label>
                 </div>
               </div>
             )}
-
-            {/* Bounding Box Legend */}
-            {recognitionResult && (
-              <div className="legend-bar">
-                <div className="legend-item">
-                  <span className="legend-dot green"></span>
-                  <span>Matched (Score &ge; 45%)</span>
-                </div>
-                <div className="legend-item">
-                  <span className="legend-dot amber"></span>
-                  <span>Review Needed (35% &ndash; 45%)</span>
-                </div>
-                <div className="legend-item">
-                  <span className="legend-dot red"></span>
-                  <span>Unknown / Unassigned</span>
-                </div>
-              </div>
-            )}
-          </div>
+          </Card>
         )}
 
-        {/* Right Column: Interactive Attendance Roster */}
-        <div className={`workspace-right card ${mode === 'manual' ? 'full-width' : ''}`}>
-          <div className="section-header">
+        {/* RIGHT COLUMN: ATTENDANCE ROSTER & CONTROLS */}
+        <Card style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
             <div>
-              <h3>Student Attendance Roster</h3>
-              <p className="text-muted text-sm">
-                Review and toggle status for each student before confirming.
-              </p>
+              <h3 style={{ fontSize: '1.05rem', fontWeight: 700, margin: 0, color: 'var(--text-primary)' }}>
+                Session Roster Review
+              </h3>
+              <span style={{ fontSize: '0.785rem', color: 'var(--text-muted)' }}>
+                Toggle statuses or assign unrecognized faces before saving.
+              </span>
             </div>
-            <button
+
+            <Button
+              variant="success"
+              size="md"
               onClick={handleConfirmAndSave}
               disabled={saving || !roster.length}
-              className="btn btn-success"
+              icon={Save}
             >
-              {saving ? (
-                <>
-                  <RefreshCw size={16} className="spin" /> Saving...
-                </>
-              ) : (
-                <>
-                  <Save size={16} /> Confirm and Save
-                </>
-              )}
-            </button>
+              {saving ? 'Saving...' : 'Confirm & Lock'}
+            </Button>
           </div>
 
-          {/* KPI Mini Bar */}
-          <div className="kpi-mini-bar">
-            <div className="kpi-mini green">
-              <span className="kpi-count">{presentCount}</span>
-              <span className="kpi-label">Present</span>
-            </div>
-            <div className="kpi-mini red">
-              <span className="kpi-count">{absentCount}</span>
-              <span className="kpi-label">Absent</span>
-            </div>
-            <div className="kpi-mini amber">
-              <span className="kpi-count">{lateCount}</span>
-              <span className="kpi-label">Late</span>
-            </div>
-            {reviewCount > 0 && (
-              <div className="kpi-mini amber-border">
-                <span className="kpi-count">{reviewCount}</span>
-                <span className="kpi-label">Needs Review</span>
-              </div>
+          {/* Quick Metrics Bar */}
+          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
+            <Badge variant="success" size="md">
+              {presentCount} Present
+            </Badge>
+            <Badge variant="danger" size="md">
+              {absentCount} Absent
+            </Badge>
+            {lateCount > 0 && (
+              <Badge variant="warning" size="md">
+                {lateCount} Late
+              </Badge>
             )}
             {unassignedFaces.length > 0 && (
-              <div className="kpi-mini red-border">
-                <span className="kpi-count">{unassignedFaces.length}</span>
-                <span className="kpi-label">Unrecognized Faces</span>
-              </div>
+              <Badge variant="warning" size="md">
+                {unassignedFaces.length} Unknown Faces
+              </Badge>
             )}
           </div>
 
-          {/* Bulk Actions Toolbar (Step 3) */}
+          {/* Bulk Action Controls */}
           {roster.length > 0 && (
             <div
-              className="bulk-toolbar"
               style={{
                 display: 'flex',
-                alignItems: 'center',
                 justifyContent: 'space-between',
-                padding: '0.65rem 0.85rem',
-                backgroundColor: '#f8fafc',
-                border: '1px solid var(--border-color)',
+                alignItems: 'center',
+                padding: '0.5rem 0.75rem',
+                backgroundColor: 'var(--bg-card-subtle)',
                 borderRadius: 'var(--radius-sm)',
-                marginBottom: '1rem',
-                flexWrap: 'wrap',
+                border: '1px solid var(--border-color)',
+                marginBottom: '0.85rem',
                 gap: '0.5rem',
+                flexWrap: 'wrap',
               }}
             >
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.4rem',
-                  fontSize: '0.825rem',
-                  fontWeight: 600,
-                  color: 'var(--text-secondary)',
-                }}
-              >
-                <CheckSquare size={15} color="var(--primary)" />
-                <span>Bulk Controls ({roster.length} students):</span>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '0.775rem', fontWeight: 700, color: 'var(--text-secondary)' }}>
+                Quick Roster Actions:
+              </span>
+              <div style={{ display: 'flex', gap: '0.4rem' }}>
                 <button
                   type="button"
                   onClick={handleMarkAllPresent}
-                  className="btn btn-sm btn-secondary"
-                  style={{
-                    gap: '0.35rem',
-                    fontSize: '0.78rem',
-                    color: '#15803d',
-                    borderColor: '#bbf7d0',
-                    backgroundColor: '#f0fdf4',
-                    fontWeight: 600,
-                  }}
-                  title="Mark all students in roster as Present"
+                  className="btn btn-sm"
+                  style={{ fontSize: '0.725rem', padding: '3px 8px', backgroundColor: 'var(--success-light)', color: 'var(--success)', border: '1px solid var(--success-border)' }}
                 >
-                  <CheckCheck size={14} /> Mark All Present
+                  All Present
                 </button>
                 <button
                   type="button"
                   onClick={handleMarkAllAbsent}
-                  className="btn btn-sm btn-secondary"
-                  style={{
-                    gap: '0.35rem',
-                    fontSize: '0.78rem',
-                    color: '#b91c1c',
-                    borderColor: '#fecaca',
-                    backgroundColor: '#fef2f2',
-                    fontWeight: 600,
-                  }}
-                  title="Mark all students in roster as Absent (reset)"
+                  className="btn btn-sm"
+                  style={{ fontSize: '0.725rem', padding: '3px 8px', backgroundColor: 'var(--danger-light)', color: 'var(--danger)', border: '1px solid var(--danger-border)' }}
                 >
-                  <UserX size={14} /> Mark All Absent
+                  All Absent
                 </button>
                 <button
                   type="button"
                   onClick={handleInvertSelection}
-                  className="btn btn-sm btn-secondary"
-                  style={{
-                    gap: '0.35rem',
-                    fontSize: '0.78rem',
-                    color: '#4338ca',
-                    borderColor: '#c7d2fe',
-                    backgroundColor: '#eef2ff',
-                    fontWeight: 600,
-                  }}
-                  title="Invert Selection: Present becomes Absent, Absent becomes Present"
+                  className="btn btn-sm"
+                  style={{ fontSize: '0.725rem', padding: '3px 8px', backgroundColor: 'var(--bg-card)', color: 'var(--text-secondary)', border: '1px solid var(--border-color)' }}
                 >
-                  <Shuffle size={14} /> Invert Selection
+                  Invert
                 </button>
               </div>
             </div>
           )}
 
-          {/* Unknown Face Assignment Box */}
+          {/* Unknown Faces Assigner */}
           {unassignedFaces.length > 0 && (
-            <div className="unknown-assignment-card">
-              <div className="unknown-header">
-                <AlertTriangle size={16} className="text-amber" />
-                <strong>Unassigned Faces ({unassignedFaces.length}):</strong>
-                <span className="text-sm text-muted">
-                  Assign unrecognized faces to absent students:
-                </span>
+            <div
+              style={{
+                padding: '0.75rem',
+                backgroundColor: 'var(--warning-light)',
+                border: '1px solid var(--warning-border)',
+                borderRadius: 'var(--radius-sm)',
+                marginBottom: '0.85rem',
+              }}
+            >
+              <div style={{ fontSize: '0.785rem', fontWeight: 700, color: 'var(--warning)', marginBottom: '0.4rem' }}>
+                Assign Detected Unknown Face #{unassignedFaces[0].index + 1}:
               </div>
-              <div className="unknown-list">
-                {unassignedFaces.map((face) => (
-                  <div key={face.index} className="unknown-row">
-                    <span className="badge badge-danger">Unknown Face #{face.index + 1}</span>
-                    <select
-                      className="select-input select-sm"
-                      defaultValue=""
-                      onChange={(e) => handleAssignUnknownFace(face.index, e.target.value)}
-                    >
-                      <option value="" disabled>
-                        Assign to absent student...
-                      </option>
-                      {roster
-                        .filter((r) => r.status === 'absent')
-                        .map((s) => (
-                          <option key={s.student_id} value={s.student_id}>
-                            {s.roll_number} - {s.full_name}
-                          </option>
-                        ))}
-                    </select>
-                  </div>
-                ))}
+              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                <select
+                  id="unknown-face-select"
+                  className="form-input"
+                  style={{ fontSize: '0.8rem', padding: '4px 8px' }}
+                >
+                  {roster.filter((r) => r.status === 'absent').map((s) => (
+                    <option key={s.student_id} value={s.student_id}>
+                      {s.roll_number} - {s.full_name}
+                    </option>
+                  ))}
+                </select>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={() => {
+                    const sel = document.getElementById('unknown-face-select');
+                    if (sel && sel.value) {
+                      handleAssignUnknownFace(unassignedFaces[0].index, sel.value);
+                    }
+                  }}
+                >
+                  Assign
+                </Button>
               </div>
             </div>
           )}
 
-          {/* Student Roster List */}
-          {loadingBatchStudents ? (
-            <div className="loading-state">
-              <RefreshCw size={24} className="spin" />
-              <p>Loading student roster...</p>
-            </div>
-          ) : roster.length === 0 ? (
-            <div className="empty-state">
-              <Users size={32} />
-              <p>No students enrolled in this batch.</p>
-            </div>
-          ) : (
-            <div className="roster-list">
-              {roster.map((student) => (
+          {/* Scrollable Roster Items List */}
+          <div style={{ flex: 1, maxHeight: '380px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.45rem' }}>
+            {loadingBatchStudents ? (
+              <div style={{ padding: '1.5rem', textAlign: 'center' }}>
+                <RefreshCw size={24} className="spin" style={{ color: 'var(--primary)', margin: '0 auto' }} />
+                <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', display: 'block', marginTop: '0.5rem' }}>Loading batch students...</span>
+              </div>
+            ) : roster.length === 0 ? (
+              <div style={{ padding: '2rem 1rem', textAlign: 'center' }}>
+                <Users size={32} style={{ color: 'var(--text-muted)', margin: '0 auto 0.5rem' }} />
+                <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                  Select an academic batch to load student roster.
+                </span>
+              </div>
+            ) : (
+              roster.map((student) => (
                 <div
                   key={student.student_id}
-                  className={`roster-item ${student.review_flag ? 'needs-review' : ''}`}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '0.65rem 0.85rem',
+                    borderRadius: 'var(--radius-md)',
+                    backgroundColor: student.status === 'present' ? 'var(--bg-card)' : 'var(--bg-card-subtle)',
+                    border: '1px solid',
+                    borderColor: student.status === 'present' ? 'var(--success-border)' : 'var(--border-color)',
+                    gap: '0.5rem',
+                  }}
                 >
-                  <div className="roster-student-info">
-                    <span className="roll-badge">{student.roll_number}</span>
-                    <div>
-                      <span className="student-name">{student.full_name}</span>
-                      <div className="student-meta">
-                        {student.method === 'face' && student.confidence_score !== null && (
-                          <span className="badge badge-info text-xs">
-                            Face: {Math.round(student.confidence_score * 100)}%
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', minWidth: 0 }}>
+                    <Avatar name={student.full_name} size="xs" />
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontWeight: 700, fontSize: '0.85rem', color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {student.full_name}
+                      </div>
+                      <div style={{ fontSize: '0.725rem', color: 'var(--text-muted)' }}>
+                        {student.roll_number}
+                        {student.confidence_score !== null && (
+                          <span style={{ color: 'var(--success)', marginLeft: '4px', fontWeight: 600 }}>
+                            • {Math.round(student.confidence_score * 100)}% Match
                           </span>
-                        )}
-                        {student.review_flag && (
-                          <span className="badge badge-warning text-xs">Review Recommended</span>
                         )}
                       </div>
                     </div>
                   </div>
 
-                  {/* Status Toggle Buttons */}
-                  <div className="status-toggle-group">
+                  {/* Present / Absent / Late Status Chips */}
+                  <div style={{ display: 'flex', gap: '3px', flexShrink: 0 }}>
                     <button
                       type="button"
-                      className={`status-btn btn-present ${
-                        student.status === 'present' ? 'active' : ''
-                      }`}
                       onClick={() => handleStatusChange(student.student_id, 'present')}
+                      style={{
+                        padding: '4px 8px',
+                        borderRadius: 'var(--radius-sm)',
+                        fontSize: '0.75rem',
+                        fontWeight: 700,
+                        border: 'none',
+                        cursor: 'pointer',
+                        backgroundColor: student.status === 'present' ? 'var(--success)' : 'transparent',
+                        color: student.status === 'present' ? '#ffffff' : 'var(--text-muted)',
+                      }}
                     >
-                      <UserCheck size={14} /> Present
+                      P
                     </button>
                     <button
                       type="button"
-                      className={`status-btn btn-absent ${
-                        student.status === 'absent' ? 'active' : ''
-                      }`}
                       onClick={() => handleStatusChange(student.student_id, 'absent')}
+                      style={{
+                        padding: '4px 8px',
+                        borderRadius: 'var(--radius-sm)',
+                        fontSize: '0.75rem',
+                        fontWeight: 700,
+                        border: 'none',
+                        cursor: 'pointer',
+                        backgroundColor: student.status === 'absent' ? 'var(--danger)' : 'transparent',
+                        color: student.status === 'absent' ? '#ffffff' : 'var(--text-muted)',
+                      }}
                     >
-                      <UserX size={14} /> Absent
+                      A
                     </button>
                     <button
                       type="button"
-                      className={`status-btn btn-late ${
-                        student.status === 'late' ? 'active' : ''
-                      }`}
                       onClick={() => handleStatusChange(student.student_id, 'late')}
+                      style={{
+                        padding: '4px 8px',
+                        borderRadius: 'var(--radius-sm)',
+                        fontSize: '0.75rem',
+                        fontWeight: 700,
+                        border: 'none',
+                        cursor: 'pointer',
+                        backgroundColor: student.status === 'late' ? 'var(--warning)' : 'transparent',
+                        color: student.status === 'late' ? '#ffffff' : 'var(--text-muted)',
+                      }}
                     >
-                      <Clock size={14} /> Late
+                      L
                     </button>
                   </div>
                 </div>
-              ))}
-            </div>
-          )}
-
-          {/* Bottom Confirm Button for Mobile Ergonomics */}
-          {roster.length > 4 && (
-            <div style={{ marginTop: '1.25rem', paddingTop: '1rem', borderTop: '1px solid var(--border-color)' }}>
-              <button
-                type="button"
-                onClick={handleConfirmAndSave}
-                disabled={saving || !roster.length}
-                className="btn btn-success"
-                style={{
-                  width: '100%',
-                  justifyContent: 'center',
-                  padding: '0.75rem',
-                  fontWeight: 700,
-                  fontSize: '0.95rem',
-                  boxShadow: '0 4px 14px rgba(16, 185, 129, 0.25)',
-                }}
-              >
-                {saving ? (
-                  <>
-                    <RefreshCw size={16} className="spin" /> Saving Attendance...
-                  </>
-                ) : (
-                  <>
-                    <Save size={16} /> Confirm and Save Attendance ({presentCount} Present, {absentCount} Absent)
-                  </>
-                )}
-              </button>
-            </div>
-          )}
-        </div>
+              ))
+            )}
+          </div>
+        </Card>
       </div>
-      {/* Live Classroom Camera Modal */}
+
+      {/* 5. LIVE WEBCAM MODAL */}
       <WebcamModal
         isOpen={isCameraModalOpen}
         onClose={() => setIsCameraModalOpen(false)}
         onCapture={handleCameraCapture}
-        title="Live Classroom Camera Stream"
-        subtitle="Aim camera at the classroom to capture all students in the frame"
-        overlayType="classroom"
-        defaultFacingMode="environment"
+        title="Capture Classroom Photograph"
       />
     </div>
   );

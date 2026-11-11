@@ -73,6 +73,18 @@ export const AuthProvider = ({ children }) => {
     setUser(null);
   };
 
+  const updateUser = (updatedFields) => {
+    setUser((prev) => {
+      const merged = { ...prev, ...updatedFields };
+      try {
+        localStorage.setItem('facemark_user', JSON.stringify(merged));
+      } catch (e) {
+        console.error('Failed to update local storage user', e);
+      }
+      return merged;
+    });
+  };
+
   const value = {
     user,
     token,
@@ -83,6 +95,7 @@ export const AuthProvider = ({ children }) => {
     login,
     register,
     logout,
+    updateUser,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
