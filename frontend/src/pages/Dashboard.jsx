@@ -11,13 +11,16 @@ import {
   TrendingUp,
   ArrowRight,
   ShieldCheck,
-  Sparkles
+  Sparkles,
+  MessageSquare,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { useToast } from '../context/ToastContext';
 import apiClient from '../api/client';
 
 const Dashboard = () => {
   const { user, isAdmin } = useAuth();
+  const { toast } = useToast();
   const [stats, setStats] = useState({
     studentsCount: 0,
     batchesCount: 0,
@@ -66,14 +69,42 @@ const Dashboard = () => {
     fetchDashboardData();
   }, []);
 
+  // 1-Click WhatsApp Parent Alert
+  const handleNotifyParent = (student) => {
+    const parentPhone = student.parent_phone ? student.parent_phone.replace(/[^0-9]/g, '') : '';
+    const parentName = student.parent_name || 'Parent / Guardian';
+    const reasonText = student.is_at_risk ? ` [Status: ${student.at_risk_reason}]` : '';
+
+    const senderName = user?.institution_name || 'AttendIQ';
+    const message = `Hello ${parentName}, this is an attendance notice from ${senderName} regarding your ward ${student.full_name} (${student.roll_number}). Their overall attendance has dropped to ${student.attendance_percentage}% with ${student.absent_count} recorded absences${reasonText}. Please contact the institute faculty for assistance.`;
+
+    if (parentPhone) {
+      const waUrl = `https://wa.me/${parentPhone}?text=${encodeURIComponent(message)}`;
+      window.open(waUrl, '_blank', 'noopener,noreferrer');
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(message);
+      }
+      toast.success(`WhatsApp chat opened for ${parentName} (${student.parent_phone}). Notice copied to clipboard!`);
+    } else {
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(message);
+      }
+      toast.warning(`No phone number on record for ${student.full_name}. Notice copied to clipboard!`);
+    }
+  };
+
   return (
     <div className="page-container">
       {/* Header */}
       <div className="page-header">
         <div>
-          <h1 className="page-title">Welcome back, {user?.name}!</h1>
+          <h1 className="page-title">
+            {user?.institution_name ? user.institution_name : `Welcome back, ${user?.name}!`}
+          </h1>
           <p className="page-subtitle">
-            AttendIQ Smart Biometric Attendance Suite • AI Recognition & Real-Time Analytics
+            {user?.institution_name
+              ? `Tutor Workspace (${user?.name}) • Biometric AI Attendance & Parent Alerts`
+              : 'AttendIQ Smart Biometric Attendance Suite • AI Recognition & Real-Time Analytics'}
           </p>
         </div>
         <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
@@ -184,7 +215,7 @@ const Dashboard = () => {
             </Link>
           </div>
 
-          <div className="table-responsive">
+          <div className="table-responsive desktop-only">
             <table className="data-table">
               <thead>
                 <tr>
@@ -195,6 +226,7 @@ const Dashboard = () => {
                   <th>Total Sessions</th>
                   <th>Attendance Rate</th>
                   <th>Status</th>
+                  <th>Parent Alert</th>
                 </tr>
               </thead>
               <tbody>
@@ -203,7 +235,36 @@ const Dashboard = () => {
                     <td>
                       <strong>{stu.roll_number}</strong>
                     </td>
-                    <td>{stu.full_name}</td>
+                    <td>
+                      <div>
+                        <div style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <span>{stu.full_name}</span>
+                          {stu.is_at_risk && (
+                            <span
+                              className="badge badge-warning"
+                              style={{
+                                fontSize: '0.68rem',
+                                padding: '1px 5px',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '3px',
+                                backgroundColor: '#fef3c7',
+                                color: '#b45309',
+                                border: '1px solid #fde68a',
+                              }}
+                              title={stu.at_risk_reason}
+                            >
+                              <AlertTriangle size={10} /> At Risk: {stu.at_risk_reason}
+                            </span>
+                          )}
+                        </div>
+                        {stu.parent_name && (
+                          <div style={{ fontSize: '0.735rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                            Parent: {stu.parent_name} {stu.parent_phone ? `(${stu.parent_phone})` : ''}
+                          </div>
+                        )}
+                      </div>
+                    </td>
                     <td>
                       <span className="badge badge-success">{stu.present_count}</span>
                     </td>
@@ -227,10 +288,90 @@ const Dashboard = () => {
                         <AlertTriangle size={12} /> Low (&lt; 75%)
                       </span>
                     </td>
+                    <td>
+                      <button
+                        type="button"
+                        onClick={() => handleNotifyParent(stu)}
+                        className="btn btn-secondary btn-sm"
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '5px',
+                          backgroundColor: '#25D366',
+                          color: '#ffffff',
+                          border: 'none',
+                          fontWeight: 600,
+                          fontSize: '0.75rem',
+                          padding: '4px 8px',
+                          borderRadius: '6px',
+                          cursor: 'pointer',
+                        }}
+                        title={`Click to open pre-filled WhatsApp alert to ${stu.parent_name || 'parent'}`}
+                      >
+                        <MessageSquare size={13} />
+                        <span>Notify Parent</span>
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
+          </div>
+
+          {/* Mobile Alert Cards (< 768px Viewport) */}
+          <div className="mobile-alert-cards">
+            {dashboardSummary.low_attendance_students.map((stu) => (
+              <div key={`mob-alert-${stu.student_id}`} className="alert-mobile-card">
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.5rem' }}>
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
+                      <span className="student-roll-chip">{stu.roll_number}</span>
+                      <strong style={{ fontSize: '0.95rem' }}>{stu.full_name}</strong>
+                    </div>
+                    {stu.parent_name && (
+                      <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.2rem' }}>
+                        Parent: <strong>{stu.parent_name}</strong> {stu.parent_phone ? `(${stu.parent_phone})` : ''}
+                      </div>
+                    )}
+                  </div>
+                  <span className="badge badge-danger" style={{ fontSize: '0.8rem', fontWeight: 700 }}>
+                    {stu.attendance_percentage}%
+                  </span>
+                </div>
+
+                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', margin: '0.5rem 0', flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                    Attended {stu.present_count} / {stu.total_sessions} sessions ({stu.absent_count} absent)
+                  </span>
+                  {stu.is_at_risk && (
+                    <span className="badge badge-warning" style={{ fontSize: '0.7rem' }}>
+                      <AlertTriangle size={11} /> {stu.at_risk_reason}
+                    </span>
+                  )}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => handleNotifyParent(stu)}
+                  className="btn btn-sm"
+                  style={{
+                    width: '100%',
+                    justifyContent: 'center',
+                    backgroundColor: '#25D366',
+                    color: '#ffffff',
+                    fontWeight: 700,
+                    gap: '0.4rem',
+                    padding: '0.55rem',
+                    borderRadius: '8px',
+                    border: 'none',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <MessageSquare size={15} />
+                  <span>Notify Parent on WhatsApp</span>
+                </button>
+              </div>
+            ))}
           </div>
         </div>
       )}

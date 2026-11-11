@@ -5,13 +5,63 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.limiter import limiter
-from app.core.security import verify_password, create_access_token
-from app.models.user import User
+from app.core.security import verify_password, create_access_token, get_password_hash
+from app.models.user import User, UserRole
 from app.schemas.token import Token
-from app.schemas.user import UserLogin, UserResponse
+from app.schemas.user import UserLogin, UserResponse, TutorRegisterRequest
 from app.api.deps import get_current_user
 
 router = APIRouter()
+
+
+@router.post("/register", response_model=Token, status_code=status.HTTP_201_CREATED, summary="Self-Service Tutor Registration")
+def register_tutor(
+    payload: TutorRegisterRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Open Multi-Tutor Registration:
+    Enables any tuition teacher in India to create their private coaching workspace.
+    Guarantees private batches, students, biometrics, and parent alert channels.
+    """
+    clean_email = payload.email.lower().strip()
+    existing_user = db.query(User).filter(User.email == clean_email).first()
+    if existing_user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"An account with email '{payload.email}' already exists. Please sign in."
+        )
+
+    new_tutor = User(
+        email=clean_email,
+        hashed_password=get_password_hash(payload.password),
+        full_name=payload.full_name.strip(),
+        institution_name=payload.institution_name.strip() if payload.institution_name else None,
+        phone=payload.phone.strip() if payload.phone else None,
+        role=UserRole.TEACHER.value,
+        is_active=True
+    )
+    db.add(new_tutor)
+    db.commit()
+    db.refresh(new_tutor)
+
+    access_token = create_access_token(
+        data={
+            "sub": new_tutor.email,
+            "role": new_tutor.role,
+            "user_id": new_tutor.id
+        }
+    )
+
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user_id": new_tutor.id,
+        "user_role": new_tutor.role,
+        "user_name": new_tutor.full_name,
+        "user_email": new_tutor.email,
+        "institution_name": new_tutor.institution_name,
+    }
 
 
 @router.post("/login", response_model=Token, summary="User Login (JSON)")
@@ -51,9 +101,11 @@ def login_json(
     return {
         "access_token": access_token,
         "token_type": "bearer",
+        "user_id": user.id,
         "user_role": user.role,
         "user_name": user.full_name,
         "user_email": user.email,
+        "institution_name": user.institution_name,
     }
 
 
@@ -93,9 +145,11 @@ def login_form(
     return {
         "access_token": access_token,
         "token_type": "bearer",
+        "user_id": user.id,
         "user_role": user.role,
         "user_name": user.full_name,
         "user_email": user.email,
+        "institution_name": user.institution_name,
     }
 
 

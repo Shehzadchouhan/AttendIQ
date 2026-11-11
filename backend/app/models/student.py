@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, JSON, func
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, JSON, func, UniqueConstraint
 from sqlalchemy.orm import relationship
 from app.core.database import Base
 
@@ -6,22 +6,37 @@ from app.core.database import Base
 class Student(Base):
     """
     SQLAlchemy Model for registered tuition center students.
+    Multi-tenant scoped: Each student belongs to a specific tutor / creator (creator_id).
     """
     __tablename__ = "students"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
-    roll_number = Column(String(50), unique=True, index=True, nullable=False)
+    roll_number = Column(String(50), index=True, nullable=False)
     full_name = Column(String(255), nullable=False)
     email = Column(String(255), nullable=True)
     phone = Column(String(50), nullable=True)
+    parent_name = Column(String(255), nullable=True)
+    parent_phone = Column(String(50), nullable=True)
     is_active = Column(Boolean, default=True, nullable=False)
     # Face Enrollment Consent tracking
     consent_given = Column(Boolean, default=False, server_default="false", nullable=False)
     consent_at = Column(DateTime(timezone=True), nullable=True)
+    # Multi-tenant workspace creator (Tutor ID)
+    creator_id = Column(
+        Integer,
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True
+    )
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("creator_id", "roll_number", name="uq_student_creator_roll"),
+    )
 
     # Cascade deletes: If a student is deleted, their enrollments, face embeddings,
     # and attendance records are automatically deleted.
+    creator = relationship("User", back_populates="created_students")
     enrollments = relationship(
         "Enrollment",
         back_populates="student",

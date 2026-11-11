@@ -10,7 +10,10 @@ import {
   TrendingUp,
   RefreshCw,
   Search,
-  Filter
+  Filter,
+  MessageSquare,
+  Phone,
+  ShieldAlert,
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -187,6 +190,31 @@ const Reports = () => {
     }
   };
 
+  // 1-Click WhatsApp Parent Alert (wa.me click-to-chat integration)
+  const handleNotifyParent = (student) => {
+    const parentPhone = student.parent_phone ? student.parent_phone.replace(/[^0-9]/g, '') : '';
+    const parentName = student.parent_name || 'Parent / Guardian';
+    const batchName = reportData?.batch_name || 'Class';
+    const reasonText = student.is_at_risk ? ` [Status: ${student.at_risk_reason}]` : '';
+
+    const senderName = user?.institution_name || 'AttendIQ';
+    const message = `Hello ${parentName}, this is an official attendance notice from ${senderName} regarding your ward ${student.full_name} (${student.roll_number}) in batch "${batchName}". Their current attendance has dropped to ${student.attendance_percentage}% with ${student.absent_count} recorded absences${reasonText}. Please ensure regular attendance to comply with institute requirements.`;
+
+    if (parentPhone) {
+      const waUrl = `https://wa.me/${parentPhone}?text=${encodeURIComponent(message)}`;
+      window.open(waUrl, '_blank', 'noopener,noreferrer');
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(message);
+      }
+      toast.success(`WhatsApp opened for ${parentName} (${student.parent_phone}). Notice copied to clipboard!`);
+    } else {
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(message);
+      }
+      toast.warning(`No phone number on record for ${student.full_name}. Notice copied to clipboard!`);
+    }
+  };
+
   // Filtered Students for Table
   const filteredStudents = (reportData?.students || []).filter((s) => {
     const q = searchStudent.toLowerCase();
@@ -203,21 +231,24 @@ const Reports = () => {
             Comprehensive attendance statistics, low-attendance alerts (&lt; 75%), daily trends, and CSV export.
           </p>
         </div>
-        <button
-          onClick={handleExportCSV}
-          disabled={exporting || !reportData || reportData.total_sessions === 0}
-          className="btn btn-primary"
-        >
-          {exporting ? (
-            <>
-              <RefreshCw size={16} className="spin" /> Exporting CSV...
-            </>
-          ) : (
-            <>
-              <Download size={16} /> Export to CSV
-            </>
-          )}
-        </button>
+        <div className="header-actions">
+          <button
+            onClick={handleExportCSV}
+            disabled={exporting || !reportData || reportData.total_sessions === 0}
+            className="btn btn-primary"
+            style={{ width: '100%', justifyContent: 'center' }}
+          >
+            {exporting ? (
+              <>
+                <RefreshCw size={16} className="spin" /> Exporting CSV...
+              </>
+            ) : (
+              <>
+                <Download size={16} /> Export to CSV
+              </>
+            )}
+          </button>
+        </div>
       </div>
 
       {/* Filter Card */}
@@ -352,22 +383,72 @@ const Reports = () => {
             </div>
           </div>
 
-          {/* Low Attendance Warning Banner (if any) */}
-          {reportData.low_attendance_count > 0 && (
-            <div className="alert alert-warning">
-              <AlertTriangle size={20} />
-              <div>
-                <strong>Low Attendance Warning ({reportData.low_attendance_count} students):</strong>
-                <p className="text-sm">
-                  The following students have fallen below the mandatory 75% attendance threshold:
+          {/* Low Attendance & Early-Warning At-Risk Alert Banner */}
+          {(reportData.low_attendance_count > 0 || reportData.students.some((s) => s.is_at_risk)) && (
+            <div className="alert alert-warning" style={{ display: 'flex', gap: '0.85rem', alignItems: 'flex-start' }}>
+              <AlertTriangle size={22} style={{ flexShrink: 0, marginTop: '2px', color: '#b45309' }} />
+              <div style={{ flex: 1 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                  <strong>
+                    Early Warning & Low Attendance Alert ({reportData.students.filter((s) => s.is_low_attendance || s.is_at_risk).length} students flagged):
+                  </strong>
+                  <span className="badge badge-warning" style={{ fontSize: '0.75rem', fontWeight: 600 }}>
+                    Parent Alerts Available
+                  </span>
+                </div>
+                <p className="text-sm" style={{ margin: '0.25rem 0 0.5rem 0' }}>
+                  Students below the 75% threshold or flagged with dropout risks (3 consecutive absences or recent rate drop &ge; 15%):
                 </p>
-                <div className="alert-tags">
+                <div className="alert-tags" style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                   {reportData.students
-                    .filter((s) => s.is_low_attendance)
+                    .filter((s) => s.is_low_attendance || s.is_at_risk)
                     .map((s) => (
-                      <span key={s.student_id} className="badge badge-warning">
-                        {s.roll_number} - {s.full_name} ({s.attendance_percentage}%)
-                      </span>
+                      <div
+                        key={s.student_id}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          padding: '4px 8px',
+                          backgroundColor: '#ffffff',
+                          borderRadius: '8px',
+                          border: '1px solid #fde68a',
+                          boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+                        }}
+                      >
+                        <span style={{ fontWeight: 600, fontSize: '0.8rem' }}>
+                          {s.roll_number} - {s.full_name} ({s.attendance_percentage}%)
+                        </span>
+                        {s.is_at_risk && (
+                          <span
+                            className="badge badge-danger"
+                            style={{ fontSize: '0.68rem', padding: '1px 5px' }}
+                            title={s.at_risk_reason}
+                          >
+                            ⚠️ {s.at_risk_reason}
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => handleNotifyParent(s)}
+                          style={{
+                            border: 'none',
+                            backgroundColor: '#25D366',
+                            color: '#ffffff',
+                            cursor: 'pointer',
+                            borderRadius: '4px',
+                            padding: '2px 6px',
+                            fontSize: '0.72rem',
+                            fontWeight: 600,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '3px',
+                          }}
+                          title={`Send WhatsApp attendance notice to ${s.parent_name || 'parent'}`}
+                        >
+                          <MessageSquare size={11} /> WhatsApp
+                        </button>
+                      </div>
                     ))}
                 </div>
               </div>
@@ -458,12 +539,13 @@ const Reports = () => {
                     <th>Total Sessions</th>
                     <th>Attendance Rate</th>
                     <th>Status</th>
+                    <th>Parent Alert</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredStudents.length === 0 ? (
                     <tr>
-                      <td colSpan="8" className="text-center text-muted py-4">
+                      <td colSpan="9" className="text-center text-muted py-4">
                         No students found matching your search.
                       </td>
                     </tr>
@@ -473,7 +555,36 @@ const Reports = () => {
                         <td>
                           <strong>{s.roll_number}</strong>
                         </td>
-                        <td>{s.full_name}</td>
+                        <td>
+                          <div>
+                            <div style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <span>{s.full_name}</span>
+                              {s.is_at_risk && (
+                                <span
+                                  className="badge badge-warning"
+                                  style={{
+                                    fontSize: '0.68rem',
+                                    padding: '1px 5px',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '3px',
+                                    backgroundColor: '#fef3c7',
+                                    color: '#b45309',
+                                    border: '1px solid #fde68a',
+                                  }}
+                                  title={`Early Warning: ${s.at_risk_reason}`}
+                                >
+                                  <AlertTriangle size={10} /> At Risk: {s.at_risk_reason}
+                                </span>
+                              )}
+                            </div>
+                            {s.parent_name && (
+                              <div style={{ fontSize: '0.735rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                                Parent: {s.parent_name} {s.parent_phone ? `(${s.parent_phone})` : ''}
+                              </div>
+                            )}
+                          </div>
+                        </td>
                         <td>
                           <span className="badge badge-success">{s.present_count}</span>
                         </td>
@@ -505,6 +616,36 @@ const Reports = () => {
                           ) : (
                             <span className="badge badge-success">
                               <CheckCircle2 size={12} /> Good
+                            </span>
+                          )}
+                        </td>
+                        <td>
+                          {s.is_low_attendance || s.is_at_risk ? (
+                            <button
+                              type="button"
+                              onClick={() => handleNotifyParent(s)}
+                              className="btn btn-secondary btn-sm"
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '5px',
+                                backgroundColor: '#25D366',
+                                color: '#ffffff',
+                                border: 'none',
+                                fontWeight: 600,
+                                fontSize: '0.75rem',
+                                padding: '4px 8px',
+                                borderRadius: '6px',
+                                cursor: 'pointer',
+                              }}
+                              title={`Click to open pre-filled WhatsApp alert to ${s.parent_name || 'parent'}`}
+                            >
+                              <MessageSquare size={13} />
+                              <span>Notify Parent</span>
+                            </button>
+                          ) : (
+                            <span className="text-muted" style={{ fontSize: '0.75rem' }}>
+                              Regular
                             </span>
                           )}
                         </td>

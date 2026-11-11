@@ -25,6 +25,10 @@ class AttendanceSession(Base):
     session_date = Column(Date, nullable=False)
     status = Column(String(50), default="completed", nullable=False)  # "scheduled", "completed"
     unrecognized_count = Column(Integer, default=0, server_default="0", nullable=False)
+    # Session locking & integrity protection
+    is_locked = Column(Boolean, default=False, server_default="false", nullable=False)
+    locked_at = Column(DateTime(timezone=True), nullable=True)
+    unlock_reason = Column(String(500), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     # Unique constraint ensuring exactly one session per batch per date
@@ -40,6 +44,13 @@ class AttendanceSession(Base):
         back_populates="session",
         cascade="all, delete-orphan",
         passive_deletes=True
+    )
+    audit_logs = relationship(
+        "AttendanceAuditLog",
+        back_populates="session",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by="desc(AttendanceAuditLog.timestamp)"
     )
 
 
@@ -80,3 +91,39 @@ class AttendanceRecord(Base):
 
     session = relationship("AttendanceSession", back_populates="records")
     student = relationship("Student", back_populates="attendance_records")
+
+
+class AttendanceAuditLog(Base):
+    """
+    Immutable audit log tracking every modification, override, and status change
+    made to attendance records, guaranteeing anti-tampering accountability for disputes.
+    """
+    __tablename__ = "attendance_audit_logs"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    session_id = Column(
+        Integer,
+        ForeignKey("attendance_sessions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True
+    )
+    student_id = Column(
+        Integer,
+        ForeignKey("students.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True
+    )
+    changed_by_user_id = Column(
+        Integer,
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True
+    )
+    previous_status = Column(String(20), nullable=True)
+    new_status = Column(String(20), nullable=True)
+    action = Column(String(50), nullable=False)  # "initial_confirm", "manual_override", "admin_unlock_edit"
+    reason = Column(String(500), nullable=True)
+    timestamp = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    session = relationship("AttendanceSession", back_populates="audit_logs")
+    student = relationship("Student")
+    changed_by_user = relationship("User")

@@ -1005,6 +1005,36 @@ const TakeAttendance = () => {
               ))}
             </div>
           )}
+
+          {/* Bottom Confirm Button for Mobile Ergonomics */}
+          {roster.length > 4 && (
+            <div style={{ marginTop: '1.25rem', paddingTop: '1rem', borderTop: '1px solid var(--border-color)' }}>
+              <button
+                type="button"
+                onClick={handleConfirmAndSave}
+                disabled={saving || !roster.length}
+                className="btn btn-success"
+                style={{
+                  width: '100%',
+                  justifyContent: 'center',
+                  padding: '0.75rem',
+                  fontWeight: 700,
+                  fontSize: '0.95rem',
+                  boxShadow: '0 4px 14px rgba(16, 185, 129, 0.25)',
+                }}
+              >
+                {saving ? (
+                  <>
+                    <RefreshCw size={16} className="spin" /> Saving Attendance...
+                  </>
+                ) : (
+                  <>
+                    <Save size={16} /> Confirm and Save Attendance ({presentCount} Present, {absentCount} Absent)
+                  </>
+                )}
+              </button>
+            </div>
+          )}
         </div>
       </div>
       {/* Live Classroom Camera Modal */}

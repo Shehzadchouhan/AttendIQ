@@ -49,7 +49,7 @@ def list_batches(
     - Teachers only see batches where teacher_id equals their user ID by default, or all if scope='all'.
     """
     query = db.query(Batch)
-    if current_user.role != UserRole.ADMIN.value and scope != "all":
+    if current_user.role != UserRole.ADMIN.value:
         query = query.filter(Batch.teacher_id == current_user.id)
 
     batches = query.order_by(Batch.name.asc()).all()

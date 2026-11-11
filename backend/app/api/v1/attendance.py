@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime, timezone, timedelta
 from typing import List, Optional, Union
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query, Body, status
 from sqlalchemy.orm import Session
@@ -8,7 +8,7 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.models.batch import Batch, Enrollment
 from app.models.student import Student, FaceEmbedding
-from app.models.attendance import AttendanceSession, AttendanceRecord
+from app.models.attendance import AttendanceSession, AttendanceRecord, AttendanceAuditLog
 from app.models.user import User, UserRole
 from app.schemas.attendance import (
     AttendanceRecognizeResponse,
@@ -18,15 +18,33 @@ from app.schemas.attendance import (
     AttendanceSessionConfirmRequest,
     AttendanceRecordResponse,
     AttendanceSessionResponse,
+    SessionUnlockRequest,
+    AttendanceAuditLogResponse,
 )
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, require_admin
 from app.services.face_engine import face_engine
 
 router = APIRouter()
 
 
+def _is_session_locked(session: AttendanceSession) -> bool:
+    """Helper to check if a session is locked manually or automatically after 24h."""
+    if session.is_locked:
+        return True
+    # Auto-lock 24h after creation if completed and not explicitly unlocked with an audit reason
+    if session.status == "completed" and not session.unlock_reason:
+        created_at = session.created_at
+        if created_at:
+            if created_at.tzinfo is None:
+                created_at = created_at.replace(tzinfo=timezone.utc)
+            now_utc = datetime.now(timezone.utc)
+            if (now_utc - created_at) > timedelta(hours=24):
+                return True
+    return False
+
+
 def _build_session_response(session: AttendanceSession, db: Session, include_records: bool = False) -> AttendanceSessionResponse:
-    """Helper to assemble AttendanceSessionResponse with enrolled count and record aggregates."""
+    """Helper to assemble AttendanceSessionResponse with enrolled count, locking status, and record aggregates."""
     batch = session.batch
     taken_by = session.taken_by_user
 
@@ -55,6 +73,8 @@ def _build_session_response(session: AttendanceSession, db: Session, include_rec
             for r in records
         ]
 
+    effective_locked = _is_session_locked(session)
+
     return AttendanceSessionResponse(
         id=session.id,
         batch_id=session.batch_id,
@@ -64,6 +84,9 @@ def _build_session_response(session: AttendanceSession, db: Session, include_rec
         taken_by_user_id=session.taken_by_user_id,
         taken_by_user_name=taken_by.full_name if taken_by else None,
         unrecognized_count=session.unrecognized_count,
+        is_locked=effective_locked,
+        locked_at=session.locked_at if session.is_locked else (session.created_at + timedelta(hours=24) if effective_locked and session.created_at else None),
+        unlock_reason=session.unlock_reason,
         present_count=present_count,
         absent_count=absent_count,
         late_count=late_count,
@@ -250,6 +273,13 @@ def confirm_attendance_session(
             detail="You do not have permission to confirm attendance for this batch."
         )
 
+    # Check session locking policy
+    if _is_session_locked(session) and current_user.role != UserRole.ADMIN.value:
+        raise HTTPException(
+            status_code=status.HTTP_423_LOCKED,
+            detail="Attendance session is locked (24-hour integrity policy). Only an administrator can unlock this session to make changes."
+        )
+
     # Normalize body format (bare list vs wrapper request)
     if isinstance(body, list):
         records_to_save = body
@@ -268,7 +298,7 @@ def confirm_attendance_session(
             )
         seen_students.add(item.student_id)
 
-    # Insert or update each attendance record
+    # Insert or update each attendance record and track audit logs
     for item in records_to_save:
         existing_rec = (
             db.query(AttendanceRecord)
@@ -279,6 +309,17 @@ def confirm_attendance_session(
             .first()
         )
         if existing_rec:
+            if existing_rec.status != item.status:
+                audit_entry = AttendanceAuditLog(
+                    session_id=session.id,
+                    student_id=item.student_id,
+                    changed_by_user_id=current_user.id,
+                    previous_status=existing_rec.status,
+                    new_status=item.status,
+                    action="manual_override" if session.status == "completed" else "status_update",
+                    reason=f"Status changed from {existing_rec.status} to {item.status}"
+                )
+                db.add(audit_entry)
             existing_rec.status = item.status
             existing_rec.method = item.method
             existing_rec.confidence_score = item.confidence_score
@@ -294,11 +335,143 @@ def confirm_attendance_session(
                 is_confirmed=True
             )
             db.add(new_rec)
+            audit_entry = AttendanceAuditLog(
+                session_id=session.id,
+                student_id=item.student_id,
+                changed_by_user_id=current_user.id,
+                previous_status=None,
+                new_status=item.status,
+                action="initial_confirm" if item.method == "face_recognition" else "manual_mark",
+                reason=f"Marked {item.status} via {item.method}"
+            )
+            db.add(audit_entry)
 
     session.unrecognized_count = final_unrecognized
     session.status = "completed"
     db.commit()
     db.refresh(session)
+
+    return _build_session_response(session, db, include_records=True)
+
+
+# ============================================================================
+# 4. LOCK / UNLOCK ATTENDANCE SESSION & AUDIT TRAIL
+# ============================================================================
+@router.post("/sessions/{id}/lock", response_model=AttendanceSessionResponse, summary="Lock Attendance Session")
+def lock_attendance_session(
+    id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+    """
+    Manually locks an attendance session to guarantee data integrity (Admin only).
+    """
+    session = db.query(AttendanceSession).filter(AttendanceSession.id == id).first()
+    if not session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Attendance session with ID {id} not found."
+        )
+
+    session.is_locked = True
+    session.locked_at = func.now()
+    session.unlock_reason = None
+
+    db.add(AttendanceAuditLog(
+        session_id=session.id,
+        student_id=None,
+        changed_by_user_id=current_user.id,
+        previous_status=None,
+        new_status=None,
+        action="session_locked",
+        reason="Session manually locked by administrator"
+    ))
+    db.commit()
+    db.refresh(session)
+    return _build_session_response(session, db, include_records=True)
+
+
+@router.post("/sessions/{id}/unlock", response_model=AttendanceSessionResponse, summary="Unlock Attendance Session with Audit Reason")
+def unlock_attendance_session(
+    id: int,
+    payload: SessionUnlockRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+    """
+    Unlocks a locked attendance session. Requires a verifiable audit reason (Admin only).
+    """
+    session = db.query(AttendanceSession).filter(AttendanceSession.id == id).first()
+    if not session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Attendance session with ID {id} not found."
+        )
+
+    session.is_locked = False
+    session.unlock_reason = payload.reason
+    session.locked_at = None
+
+    db.add(AttendanceAuditLog(
+        session_id=session.id,
+        student_id=None,
+        changed_by_user_id=current_user.id,
+        previous_status=None,
+        new_status=None,
+        action="session_unlocked",
+        reason=payload.reason
+    ))
+    db.commit()
+    db.refresh(session)
+    return _build_session_response(session, db, include_records=True)
+
+
+@router.get("/sessions/{id}/audit-logs", response_model=List[AttendanceAuditLogResponse], summary="Get Attendance Session Audit Logs")
+def get_session_audit_logs(
+    id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Retrieves full chronological audit trail of all changes and overrides for an attendance session.
+    """
+    session = db.query(AttendanceSession).filter(AttendanceSession.id == id).first()
+    if not session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Attendance session with ID {id} not found."
+        )
+
+    if current_user.role != UserRole.ADMIN.value and session.batch.teacher_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to view audit logs for this batch."
+        )
+
+    logs = (
+        db.query(AttendanceAuditLog)
+        .filter(AttendanceAuditLog.session_id == id)
+        .order_by(AttendanceAuditLog.timestamp.desc(), AttendanceAuditLog.id.desc())
+        .all()
+    )
+
+    return [
+        AttendanceAuditLogResponse(
+            id=log.id,
+            session_id=log.session_id,
+            student_id=log.student_id,
+            student_name=log.student.full_name if log.student else None,
+            roll_number=log.student.roll_number if log.student else None,
+            changed_by_user_id=log.changed_by_user_id,
+            changed_by_user_name=log.changed_by_user.full_name if log.changed_by_user else None,
+            previous_status=log.previous_status,
+            new_status=log.new_status,
+            action=log.action,
+            reason=log.reason,
+            timestamp=log.timestamp
+        )
+        for log in logs
+    ]
 
     return _build_session_response(session, db, include_records=True)
 

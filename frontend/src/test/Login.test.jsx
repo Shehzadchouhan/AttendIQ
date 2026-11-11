@@ -22,35 +22,36 @@ describe('Login Page Smoke Tests', () => {
     renderLogin();
 
     // Check branding
-    expect(screen.getByText('FaceMark')).toBeInTheDocument();
-    expect(screen.getByText('Tuition Center Attendance System')).toBeInTheDocument();
+    expect(screen.getByText('Attend')).toBeInTheDocument();
+    expect(screen.getByText('IQ')).toBeInTheDocument();
+    expect(screen.getByText(/Open AI Attendance Platform/i)).toBeInTheDocument();
 
     // Check inputs
-    expect(screen.getByPlaceholderText('e.g. admin@facemark.local')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/teacher@facemark.local/i)).toBeInTheDocument();
     expect(screen.getByPlaceholderText('••••••••')).toBeInTheDocument();
 
     // Check Sign In button
-    expect(screen.getByRole('button', { name: /Sign In/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Sign In to Workspace/i })).toBeInTheDocument();
   });
 
   it('renders quick fill buttons and populates credentials on click', () => {
     renderLogin();
 
-    const fillAdminBtn = screen.getByRole('button', { name: /Fill Admin/i });
-    const fillTeacherBtn = screen.getByRole('button', { name: /Fill Teacher/i });
+    const fillAdminBtn = screen.getByRole('button', { name: 'Admin' });
+    const fillTeacherBtn = screen.getByRole('button', { name: 'Prof. Sharma' });
 
     expect(fillAdminBtn).toBeInTheDocument();
     expect(fillTeacherBtn).toBeInTheDocument();
 
     // Click Fill Admin
     fireEvent.click(fillAdminBtn);
-    const emailInput = screen.getByPlaceholderText('e.g. admin@facemark.local');
+    const emailInput = screen.getByPlaceholderText(/teacher@facemark.local/i);
     const passwordInput = screen.getByPlaceholderText('••••••••');
 
     expect(emailInput.value).toBe('admin@facemark.local');
     expect(passwordInput.value).toBe('admin123');
 
-    // Click Fill Teacher
+    // Click Fill Teacher (Prof. Sharma)
     fireEvent.click(fillTeacherBtn);
     expect(emailInput.value).toBe('teacher@facemark.local');
     expect(passwordInput.value).toBe('teacher123');

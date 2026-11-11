@@ -1,3 +1,6 @@
+@import './styles/design-tokens.css';
+@import './styles/ui-components.css';
+
 :root {
   --font-family: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   
@@ -818,6 +821,26 @@ button, input, select, textarea {
 .demo-btn-group {
   display: flex;
   gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.demo-btn-group .btn {
+  flex: 1;
+  min-width: 90px;
+  justify-content: center;
+}
+
+.register-grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+}
+
+@media (max-width: 440px) {
+  .register-grid-2 {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
 }
 
 /* ============================================================================
@@ -1996,6 +2019,367 @@ button, input, select, textarea {
   .alert-tags .badge {
     font-size: 0.7rem;
     padding: 0.2rem 0.45rem;
+  }
+}
+
+/* ==========================================================================
+   MOBILE-FIRST SENIOR FRONTEND DESIGN SYSTEM (< 768px)
+   ========================================================================== */
+
+/* Universal Tactile Micro-Interactions */
+button, .btn, .nav-item, .bottom-nav-item, .stat-card, .student-mobile-card, .batch-mobile-card {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:active, .btn:active {
+  transform: scale(0.97);
+}
+
+/* Desktop vs Mobile Toggle Classes */
+.mobile-student-cards,
+.mobile-batch-cards,
+.mobile-alert-cards,
+.mobile-bottom-nav {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  /* Hide heavy desktop-only spreadsheet tables on smartphones */
+  .desktop-only {
+    display: none !important;
+  }
+
+  /* Main scroll view offset for bottom navigation bar */
+  .app-main-content {
+    padding-bottom: 74px;
+  }
+
+  .page-container {
+    padding: 1rem 0.85rem 5.5rem 0.85rem !important;
+  }
+
+  /* ------------------------------------------------------------------------
+     MOBILE BOTTOM NAVIGATION BAR
+     ------------------------------------------------------------------------ */
+  .mobile-bottom-nav {
+    display: flex;
+    align-items: center;
+    justify-content: space-around;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 64px;
+    background: rgba(255, 255, 255, 0.94);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border-top: 1px solid var(--border-color);
+    z-index: 45;
+    padding: 0 0.5rem;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    box-shadow: 0 -4px 20px rgba(15, 23, 42, 0.06);
+  }
+
+  .bottom-nav-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    flex: 1;
+    height: 100%;
+    color: #64748b;
+    text-decoration: none;
+    transition: all 0.18s ease;
+    position: relative;
+    padding-top: 4px;
+  }
+
+  .bottom-nav-item.active {
+    color: var(--primary);
+  }
+
+  .bottom-nav-item.active::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 24px;
+    height: 3px;
+    border-radius: 0 0 4px 4px;
+    background-color: var(--primary);
+  }
+
+  .bottom-nav-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.15s ease;
+  }
+
+  .bottom-nav-item.active .bottom-nav-icon {
+    transform: translateY(-1px);
+  }
+
+  .bottom-nav-label {
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+
+  /* Center Prominent Attendance Button */
+  .bottom-nav-center {
+    position: relative;
+  }
+
+  .bottom-nav-center-bubble {
+    width: 46px;
+    height: 46px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--primary) 0%, #06b6d4 100%);
+    color: #ffffff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 4px 14px rgba(79, 70, 229, 0.35);
+    margin-top: -16px;
+    transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s ease;
+  }
+
+  .bottom-nav-center:active .bottom-nav-center-bubble {
+    transform: scale(0.92);
+  }
+
+  .bottom-nav-center.active .bottom-nav-center-bubble {
+    box-shadow: 0 6px 18px rgba(79, 70, 229, 0.5);
+  }
+
+  /* ------------------------------------------------------------------------
+     MOBILE STUDENT CARDS
+     ------------------------------------------------------------------------ */
+  .mobile-student-cards {
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+  }
+
+  .student-mobile-card {
+    background: #ffffff;
+    border: 1px solid var(--border-color);
+    border-radius: 14px;
+    padding: 1rem;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    transition: all 0.2s ease;
+  }
+
+  .student-mobile-card:active {
+    background-color: #fafafa;
+  }
+
+  .student-card-top {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+  }
+
+  .student-roll-chip {
+    padding: 0.35rem 0.65rem;
+    background: var(--primary-light);
+    color: var(--primary);
+    font-weight: 800;
+    font-size: 0.85rem;
+    border-radius: 8px;
+    border: 1px solid rgba(79, 70, 229, 0.2);
+    letter-spacing: -0.01em;
+    flex-shrink: 0;
+  }
+
+  .student-card-name {
+    font-size: 1.025rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin: 0;
+    line-height: 1.25;
+  }
+
+  .student-card-meta {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-top: 0.25rem;
+    flex-wrap: wrap;
+  }
+
+  .student-card-parent-box {
+    background: #f8fafc;
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    padding: 0.65rem 0.75rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+  }
+
+  .btn-quick-wa {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    background-color: #25D366;
+    color: #ffffff !important;
+    font-weight: 700;
+    font-size: 0.75rem;
+    padding: 0.35rem 0.65rem;
+    border-radius: 6px;
+    text-decoration: none;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+  }
+
+  .btn-quick-wa:active {
+    transform: scale(0.95);
+  }
+
+  .btn-quick-call {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    background-color: #f1f5f9;
+    color: var(--text-primary) !important;
+    font-weight: 700;
+    font-size: 0.75rem;
+    padding: 0.35rem 0.65rem;
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+    text-decoration: none;
+  }
+
+  .btn-quick-call:active {
+    transform: scale(0.95);
+  }
+
+  .student-card-contact-row {
+    display: flex;
+    gap: 0.75rem;
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    flex-wrap: wrap;
+  }
+
+  .contact-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+  }
+
+  .student-card-actions {
+    display: flex;
+    gap: 0.5rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid #f1f5f9;
+  }
+
+  /* ------------------------------------------------------------------------
+     MOBILE BATCH CARDS
+     ------------------------------------------------------------------------ */
+  .mobile-batch-cards {
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+  }
+
+  .batch-mobile-card {
+    background: #ffffff;
+    border: 1px solid var(--border-color);
+    border-radius: 14px;
+    padding: 1rem;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+    display: flex;
+    flex-direction: column;
+    gap: 0.65rem;
+  }
+
+  .batch-card-top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.5rem;
+  }
+
+  .batch-card-name {
+    font-size: 1.05rem;
+    font-weight: 800;
+    color: var(--text-primary);
+    margin: 0;
+    line-height: 1.25;
+  }
+
+  .batch-id-chip {
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: var(--text-muted);
+    background: #f1f5f9;
+    padding: 0.2rem 0.5rem;
+    border-radius: 6px;
+  }
+
+  .batch-card-details {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    font-size: 0.825rem;
+  }
+
+  .detail-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    color: var(--text-secondary);
+  }
+
+  .batch-card-actions {
+    display: flex;
+    gap: 0.45rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid #f1f5f9;
+  }
+
+  /* ------------------------------------------------------------------------
+     MOBILE ALERT CARDS (Dashboard Low Attendance)
+     ------------------------------------------------------------------------ */
+  .mobile-alert-cards {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  .alert-mobile-card {
+    background: #ffffff;
+    border: 1px solid #fde68a;
+    border-left: 4px solid #f59e0b;
+    border-radius: 12px;
+    padding: 0.85rem;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+  }
+
+  /* Session History Stepper Responsiveness */
+  .session-stepper-bar {
+    flex-direction: column;
+    align-items: stretch !important;
+  }
+
+  .session-stepper-bar > div:first-child {
+    width: 100% !important;
+  }
+
+  .session-stepper-bar > div:last-child {
+    width: 100% !important;
+    justify-content: space-between;
   }
 }
 

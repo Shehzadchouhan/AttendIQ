@@ -28,12 +28,34 @@ export const AuthProvider = ({ children }) => {
 
   const login = async (email, password) => {
     const response = await apiClient.post('/auth/login', { email, password });
-    const { access_token, user_role, user_name, user_email } = response.data;
+    const { access_token, user_id, user_role, user_name, user_email, institution_name } = response.data;
 
     const userData = {
+      id: user_id,
       email: user_email,
       name: user_name,
       role: user_role,
+      institution_name: institution_name || '',
+    };
+
+    localStorage.setItem('facemark_token', access_token);
+    localStorage.setItem('facemark_user', JSON.stringify(userData));
+
+    setToken(access_token);
+    setUser(userData);
+    return userData;
+  };
+
+  const register = async (registerData) => {
+    const response = await apiClient.post('/auth/register', registerData);
+    const { access_token, user_id, user_role, user_name, user_email, institution_name } = response.data;
+
+    const userData = {
+      id: user_id,
+      email: user_email,
+      name: user_name,
+      role: user_role,
+      institution_name: institution_name || '',
     };
 
     localStorage.setItem('facemark_token', access_token);
@@ -59,6 +81,7 @@ export const AuthProvider = ({ children }) => {
     isAdmin: user?.role === 'admin',
     isTeacher: user?.role === 'teacher',
     login,
+    register,
     logout,
   };
 

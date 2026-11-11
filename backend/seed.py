@@ -25,7 +25,7 @@ from app.core.security import get_password_hash
 from app.models.user import User, UserRole
 from app.models.student import Student
 from app.models.batch import Batch, Enrollment
-from app.models.attendance import AttendanceSession, AttendanceRecord
+from app.models.attendance import AttendanceSession, AttendanceRecord, AttendanceAuditLog
 
 
 def get_session_dates(num_days: int = 14) -> list[date]:
@@ -82,6 +82,8 @@ def seed_database():
                 email=prof_sharma_email,
                 hashed_password=get_password_hash(settings.SEED_TEACHER_PASSWORD),
                 full_name="Prof. Rajesh Sharma",
+                institution_name="Sharma Mathematics Academy",
+                phone="+91 9811100001",
                 role=UserRole.TEACHER.value,
                 is_active=True
             )
@@ -91,6 +93,8 @@ def seed_database():
             print(f"[+] Faculty created: Prof. Rajesh Sharma ({prof_sharma_email})")
         else:
             prof_sharma.full_name = "Prof. Rajesh Sharma"
+            prof_sharma.institution_name = "Sharma Mathematics Academy"
+            prof_sharma.phone = "+91 9811100001"
             prof_sharma.is_active = True
             db.commit()
             db.refresh(prof_sharma)
@@ -104,6 +108,8 @@ def seed_database():
                 email=dr_kapoor_email,
                 hashed_password=get_password_hash("teacher123"),
                 full_name="Dr. Neha Kapoor",
+                institution_name="Kapoor Science Institute",
+                phone="+91 9811100002",
                 role=UserRole.TEACHER.value,
                 is_active=True
             )
@@ -113,6 +119,8 @@ def seed_database():
             print(f"[+] Faculty created: Dr. Neha Kapoor ({dr_kapoor_email})")
         else:
             dr_kapoor.full_name = "Dr. Neha Kapoor"
+            dr_kapoor.institution_name = "Kapoor Science Institute"
+            dr_kapoor.phone = "+91 9811100002"
             dr_kapoor.is_active = True
             db.commit()
             db.refresh(dr_kapoor)
@@ -191,30 +199,31 @@ def seed_database():
         # 4. Seed 20 Realistic Students (STU-101 to STU-120)
         # ======================================================================
         student_data = [
-            {"roll_number": "STU-101", "full_name": "Aarav Sharma", "email": "aarav.sharma@example.com", "phone": "+91 9811100101"},
-            {"roll_number": "STU-102", "full_name": "Diya Patel", "email": "diya.patel@example.com", "phone": "+91 9811100102"},
-            {"roll_number": "STU-103", "full_name": "Rohan Verma", "email": "rohan.verma@example.com", "phone": "+91 9811100103"},
-            {"roll_number": "STU-104", "full_name": "Ananya Gupta", "email": "ananya.gupta@example.com", "phone": "+91 9811100104"},
-            {"roll_number": "STU-105", "full_name": "Kabir Singh", "email": "kabir.singh@example.com", "phone": "+91 9811100105"},
-            {"roll_number": "STU-106", "full_name": "Ishaan Malhotra", "email": "ishaan.malhotra@example.com", "phone": "+91 9811100106"},
-            {"roll_number": "STU-107", "full_name": "Meera Nair", "email": "meera.nair@example.com", "phone": "+91 9811100107"},
-            {"roll_number": "STU-108", "full_name": "Aditya Joshi", "email": "aditya.joshi@example.com", "phone": "+91 9811100108"},
-            {"roll_number": "STU-109", "full_name": "Riya Sen", "email": "riya.sen@example.com", "phone": "+91 9811100109"},
-            {"roll_number": "STU-110", "full_name": "Siddharth Rao", "email": "siddharth.rao@example.com", "phone": "+91 9811100110"},
-            {"roll_number": "STU-111", "full_name": "Tanvi Deshmukh", "email": "tanvi.deshmukh@example.com", "phone": "+91 9811100111"},
-            {"roll_number": "STU-112", "full_name": "Vivaan Kapoor", "email": "vivaan.kapoor@example.com", "phone": "+91 9811100112"},
-            {"roll_number": "STU-113", "full_name": "Pooja Bhattacharya", "email": "pooja.b@example.com", "phone": "+91 9811100113"},
-            {"roll_number": "STU-114", "full_name": "Aryan Kulkarni", "email": "aryan.kulkarni@example.com", "phone": "+91 9811100114"},
-            {"roll_number": "STU-115", "full_name": "Sneha Reddy", "email": "sneha.reddy@example.com", "phone": "+91 9811100115"},
-            {"roll_number": "STU-116", "full_name": "Harsh Vardhan", "email": "harsh.vardhan@example.com", "phone": "+91 9811100116"},
-            {"roll_number": "STU-117", "full_name": "Kavya Iyer", "email": "kavya.iyer@example.com", "phone": "+91 9811100117"},
-            {"roll_number": "STU-118", "full_name": "Devansh Saxena", "email": "devansh.saxena@example.com", "phone": "+91 9811100118"},
-            {"roll_number": "STU-119", "full_name": "Nandini Choudhury", "email": "nandini.c@example.com", "phone": "+91 9811100119"},
-            {"roll_number": "STU-120", "full_name": "Yash Singhal", "email": "yash.singhal@example.com", "phone": "+91 9811100120"},
+            {"roll_number": "STU-101", "full_name": "Aarav Sharma", "email": "aarav.sharma@example.com", "phone": "+91 9811100101", "parent_name": "Mr. Vikram Sharma", "parent_phone": "+919811100201"},
+            {"roll_number": "STU-102", "full_name": "Diya Patel", "email": "diya.patel@example.com", "phone": "+91 9811100102", "parent_name": "Mrs. Sunita Patel", "parent_phone": "+919811100202"},
+            {"roll_number": "STU-103", "full_name": "Rohan Verma", "email": "rohan.verma@example.com", "phone": "+91 9811100103", "parent_name": "Mr. Rajesh Verma", "parent_phone": "+919811100203"},
+            {"roll_number": "STU-104", "full_name": "Ananya Gupta", "email": "ananya.gupta@example.com", "phone": "+91 9811100104", "parent_name": "Mr. Anil Gupta", "parent_phone": "+919811100204"},
+            {"roll_number": "STU-105", "full_name": "Kabir Singh", "email": "kabir.singh@example.com", "phone": "+91 9811100105", "parent_name": "Mrs. Harpreet Singh", "parent_phone": "+919811100205"},
+            {"roll_number": "STU-106", "full_name": "Ishaan Malhotra", "email": "ishaan.malhotra@example.com", "phone": "+91 9811100106", "parent_name": "Mr. Sanjay Malhotra", "parent_phone": "+919811100206"},
+            {"roll_number": "STU-107", "full_name": "Meera Nair", "email": "meera.nair@example.com", "phone": "+91 9811100107", "parent_name": "Mrs. Lakshmi Nair", "parent_phone": "+919811100207"},
+            {"roll_number": "STU-108", "full_name": "Aditya Joshi", "email": "aditya.joshi@example.com", "phone": "+91 9811100108", "parent_name": "Mr. Prakash Joshi", "parent_phone": "+919811100208"},
+            {"roll_number": "STU-109", "full_name": "Riya Sen", "email": "riya.sen@example.com", "phone": "+91 9811100109", "parent_name": "Mrs. Moushumi Sen", "parent_phone": "+919811100209"},
+            {"roll_number": "STU-110", "full_name": "Siddharth Rao", "email": "siddharth.rao@example.com", "phone": "+91 9811100110", "parent_name": "Mr. Venkat Rao", "parent_phone": "+919811100210"},
+            {"roll_number": "STU-111", "full_name": "Tanvi Deshmukh", "email": "tanvi.deshmukh@example.com", "phone": "+91 9811100111", "parent_name": "Mrs. Priya Deshmukh", "parent_phone": "+919811100211"},
+            {"roll_number": "STU-112", "full_name": "Vivaan Kapoor", "email": "vivaan.kapoor@example.com", "phone": "+91 9811100112", "parent_name": "Mr. Amit Kapoor", "parent_phone": "+919811100212"},
+            {"roll_number": "STU-113", "full_name": "Pooja Bhattacharya", "email": "pooja.b@example.com", "phone": "+91 9811100113", "parent_name": "Mr. Debashis Bhattacharya", "parent_phone": "+919811100213"},
+            {"roll_number": "STU-114", "full_name": "Aryan Kulkarni", "email": "aryan.kulkarni@example.com", "phone": "+91 9811100114", "parent_name": "Mrs. Radhika Kulkarni", "parent_phone": "+919811100214"},
+            {"roll_number": "STU-115", "full_name": "Sneha Reddy", "email": "sneha.reddy@example.com", "phone": "+91 9811100115", "parent_name": "Mr. Srinivas Reddy", "parent_phone": "+919811100215"},
+            {"roll_number": "STU-116", "full_name": "Harsh Vardhan", "email": "harsh.vardhan@example.com", "phone": "+91 9811100116", "parent_name": "Mr. Alok Vardhan", "parent_phone": "+919811100216"},
+            {"roll_number": "STU-117", "full_name": "Kavya Iyer", "email": "kavya.iyer@example.com", "phone": "+91 9811100117", "parent_name": "Mrs. Gayatri Iyer", "parent_phone": "+919811100217"},
+            {"roll_number": "STU-118", "full_name": "Devansh Saxena", "email": "devansh.saxena@example.com", "phone": "+91 9811100118", "parent_name": "Mr. Rajiv Saxena", "parent_phone": "+919811100218"},
+            {"roll_number": "STU-119", "full_name": "Nandini Choudhury", "email": "nandini.c@example.com", "phone": "+91 9811100119", "parent_name": "Mrs. Sharmila Choudhury", "parent_phone": "+919811100219"},
+            {"roll_number": "STU-120", "full_name": "Yash Singhal", "email": "yash.singhal@example.com", "phone": "+91 9811100120", "parent_name": "Mr. Manoj Singhal", "parent_phone": "+919811100220"},
         ]
 
         student_map = {}
-        for s_info in student_data:
+        for idx, s_info in enumerate(student_data):
+            creator_tutor = prof_sharma if (idx < 8 or idx >= 16) else dr_kapoor
             s_obj = db.query(Student).filter(Student.roll_number == s_info["roll_number"]).first()
             if not s_obj:
                 s_obj = Student(
@@ -222,6 +231,9 @@ def seed_database():
                     full_name=s_info["full_name"],
                     email=s_info["email"],
                     phone=s_info["phone"],
+                    parent_name=s_info["parent_name"],
+                    parent_phone=s_info["parent_phone"],
+                    creator_id=creator_tutor.id,
                     is_active=True,
                     consent_given=True,
                     consent_at=datetime.now(timezone.utc)
@@ -234,6 +246,9 @@ def seed_database():
                 s_obj.full_name = s_info["full_name"]
                 s_obj.email = s_info["email"]
                 s_obj.phone = s_info["phone"]
+                s_obj.parent_name = s_info["parent_name"]
+                s_obj.parent_phone = s_info["parent_phone"]
+                s_obj.creator_id = creator_tutor.id
                 s_obj.is_active = True
                 s_obj.consent_given = True
                 db.commit()
@@ -308,10 +323,12 @@ def seed_database():
             "STU-118": {1, 9},
 
             # Flagged Students (4-5 absences in 14 days -> 64.29% or 71.43% -> Alert < 75%)
-            "STU-105": {2, 4, 7, 10, 13},  # Absent today, 64.29%
+            # STU-105: Absent on last 3 consecutive sessions (11, 12, 13) -> triggers At-Risk flag (3 Consecutive Absences)
+            "STU-105": {2, 4, 11, 12, 13},  # 64.29% + 3 consecutive absences
             "STU-107": {1, 3, 6, 8, 11},   # 64.29%
             "STU-112": {2, 5, 8, 11},       # 71.43%
-            "STU-116": {0, 4, 6, 9, 12},   # 64.29%
+            # STU-116: Perfect in week 1, 4 absences in week 2 -> triggers At-Risk flag (Dropped > 15% recently)
+            "STU-116": {8, 10, 11, 12},   # 71.43% + sharp drop
             "STU-120": {1, 5, 7, 10},       # 71.43%
         }
 
@@ -332,6 +349,8 @@ def seed_database():
             for s_idx, s_date in enumerate(session_dates):
                 # Unrecognized guest/unmapped face count for realism
                 unrec_count = 1 if s_idx in [2, 7, 11] else 0
+                is_past_session = (s_idx < 13)  # Sessions older than today are locked
+                lock_time = datetime.combine(s_date, time(23, 59), tzinfo=timezone.utc) if is_past_session else None
 
                 session = db.query(AttendanceSession).filter(
                     AttendanceSession.batch_id == b.id,
@@ -345,6 +364,8 @@ def seed_database():
                         session_date=s_date,
                         status="completed",
                         unrecognized_count=unrec_count,
+                        is_locked=is_past_session,
+                        locked_at=lock_time,
                         created_at=datetime.combine(s_date, time(9, 30), tzinfo=timezone.utc)
                     )
                     db.add(session)
@@ -355,6 +376,34 @@ def seed_database():
                     session.taken_by_user_id = b.teacher_id
                     session.status = "completed"
                     session.unrecognized_count = unrec_count
+                    session.is_locked = is_past_session
+                    session.locked_at = lock_time
+                    db.commit()
+
+                # Ensure initial audit log trail exists for demonstrations
+                audit_count = db.query(AttendanceAuditLog).filter(AttendanceAuditLog.session_id == session.id).count()
+                if audit_count == 0:
+                    db.add(AttendanceAuditLog(
+                        session_id=session.id,
+                        student_id=None,
+                        changed_by_user_id=b.teacher_id,
+                        previous_status=None,
+                        new_status="completed",
+                        action="session_confirmed",
+                        reason=f"Attendance session confirmed with {len(roll_list)} roster records",
+                        timestamp=datetime.combine(s_date, time(9, 35), tzinfo=timezone.utc)
+                    ))
+                    if is_past_session:
+                        db.add(AttendanceAuditLog(
+                            session_id=session.id,
+                            student_id=None,
+                            changed_by_user_id=admin.id,
+                            previous_status=None,
+                            new_status=None,
+                            action="session_locked",
+                            reason="24-hour integrity policy automated lock",
+                            timestamp=lock_time
+                        ))
                     db.commit()
 
                 # Attendance records for each enrolled student

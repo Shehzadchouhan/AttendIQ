@@ -11,7 +11,10 @@ import {
   CheckCircle2,
   Upload,
   ShieldCheck,
-  UserCheck
+  UserCheck,
+  Phone,
+  Mail,
+  MessageSquare
 } from 'lucide-react';
 import apiClient from '../api/client';
 import { useAuth } from '../context/AuthContext';
@@ -19,7 +22,7 @@ import { useToast } from '../context/ToastContext';
 import WebcamModal from '../components/WebcamModal';
 
 const Students = () => {
-  const { isAdmin } = useAuth();
+  const { user, isAdmin } = useAuth();
   const { toast } = useToast();
   const [students, setStudents] = useState([]);
   const [search, setSearch] = useState('');
@@ -34,8 +37,14 @@ const Students = () => {
     full_name: '',
     email: '',
     phone: '',
+    parent_name: '',
+    parent_phone: '',
     is_active: true,
   });
+
+  // Biometric Data Retention State (DPDP Compliance)
+  const [isRetentionModalOpen, setIsRetentionModalOpen] = useState(false);
+  const [purgingBiometrics, setPurgingBiometrics] = useState(false);
 
   // Face Enrollment Modal State
   const [isFaceModalOpen, setIsFaceModalOpen] = useState(false);
@@ -87,6 +96,8 @@ const Students = () => {
       full_name: '',
       email: '',
       phone: '',
+      parent_name: '',
+      parent_phone: '',
       is_active: true,
     });
     setFormError('');
@@ -100,10 +111,26 @@ const Students = () => {
       full_name: student.full_name,
       email: student.email || '',
       phone: student.phone || '',
+      parent_name: student.parent_name || '',
+      parent_phone: student.parent_phone || '',
       is_active: student.is_active,
     });
     setFormError('');
     setIsModalOpen(true);
+  };
+
+  const handlePurgeInactiveFaces = async () => {
+    try {
+      setPurgingBiometrics(true);
+      const res = await apiClient.post('/students/privacy/purge-inactive-faces');
+      toast.success(res.data?.message || 'Biometric retention purge completed successfully.');
+      setIsRetentionModalOpen(false);
+      fetchStudents(search);
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to purge inactive biometric embeddings.');
+    } finally {
+      setPurgingBiometrics(false);
+    }
   };
 
   const handleSaveStudent = async (e) => {
@@ -127,20 +154,21 @@ const Students = () => {
     }
   };
 
-  const handleDeleteStudent = async (studentId, studentName) => {
-    if (!isAdmin) {
-      toast.warning('Only Administrators can delete student records.');
+  const handleDeleteStudent = async (student) => {
+    const isOwner = Boolean(student.creator_id && user?.id && student.creator_id === user.id);
+    if (!isAdmin && !isOwner) {
+      toast.warning('Only Administrators or the tutor who registered this student can delete this record.');
       return;
     }
 
     if (
       window.confirm(
-        `Are you sure you want to delete student "${studentName}"? This will cascade remove their enrollments, face data, and attendance records.`
+        `Are you sure you want to delete student "${student.full_name}" (${student.roll_number})? This will cascade remove their enrollments, face data, and attendance records.`
       )
     ) {
       try {
-        await apiClient.delete(`/students/${studentId}`);
-        toast.success(`Student "${studentName}" deleted.`);
+        await apiClient.delete(`/students/${student.id}`);
+        toast.success(`Student "${student.full_name}" deleted.`);
         fetchStudents(search);
       } catch (err) {
         const errMsg = err.response?.data?.detail || 'Failed to delete student.';
@@ -294,11 +322,29 @@ const Students = () => {
       <div className="page-header">
         <div>
           <h1 className="page-title">Students Management</h1>
-          <p className="page-subtitle">Register students, manage profiles and face enrollment</p>
+          <p className="page-subtitle">Register students, manage profiles, parent contacts and biometric enrollment</p>
         </div>
-        <button onClick={handleOpenAddModal} className="btn btn-primary">
-          <UserPlus size={18} /> Add New Student
-        </button>
+        <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
+          {isAdmin && (
+            <button
+              onClick={() => setIsRetentionModalOpen(true)}
+              className="btn btn-secondary"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.4rem',
+                border: '1px solid #cbd5e1',
+                fontWeight: 600,
+              }}
+              title="Biometric Data Retention Control (DPDP Act compliance): Purge face biometrics for inactive students"
+            >
+              <ShieldCheck size={16} color="var(--primary)" /> Biometric Retention Purge
+            </button>
+          )}
+          <button onClick={handleOpenAddModal} className="btn btn-primary">
+            <UserPlus size={18} /> Add New Student
+          </button>
+        </div>
       </div>
 
       {/* Toolbar / Search */}
@@ -315,16 +361,16 @@ const Students = () => {
         </div>
       </div>
 
-      {/* Students Data Table */}
-      <div className="table-container">
+      {/* Students Data Table (Desktop Viewport) */}
+      <div className="table-container desktop-only">
         <table className="data-table">
           <thead>
             <tr>
               <th>ID</th>
               <th>Roll Number</th>
               <th>Full Name</th>
-              <th>Email</th>
-              <th>Phone</th>
+              <th>Parent Contact</th>
+              <th>Email / Phone</th>
               <th>Status</th>
               <th>Face Data Consent</th>
               <th style={{ textAlign: 'right' }}>Actions</th>
@@ -358,8 +404,24 @@ const Students = () => {
                     </span>
                   </td>
                   <td style={{ fontWeight: 600 }}>{student.full_name}</td>
-                  <td>{student.email || '—'}</td>
-                  <td>{student.phone || '—'}</td>
+                  <td>
+                    {student.parent_name ? (
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: '0.825rem' }}>{student.parent_name}</div>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                          {student.parent_phone || 'No phone'}
+                        </div>
+                      </div>
+                    ) : (
+                      <span className="text-muted text-xs">—</span>
+                    )}
+                  </td>
+                  <td>
+                    <div style={{ fontSize: '0.825rem' }}>{student.email || '—'}</div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                      {student.phone || '—'}
+                    </div>
+                  </td>
                   <td>
                     <span className={`badge ${student.is_active ? 'badge-active' : 'badge-inactive'}`}>
                       {student.is_active ? 'Active' : 'Inactive'}
@@ -399,14 +461,19 @@ const Students = () => {
                       >
                         <Edit2 size={15} />
                       </button>
-                      <button
-                        onClick={() => handleDeleteStudent(student.id, student.full_name)}
-                        className="btn btn-danger btn-icon"
-                        title={isAdmin ? 'Delete Student (Admin Only)' : 'Admin role required to delete'}
-                        style={!isAdmin ? { opacity: 0.45, cursor: 'not-allowed' } : {}}
-                      >
-                        <Trash2 size={15} />
-                      </button>
+                      {(() => {
+                        const canDelete = isAdmin || Boolean(student.creator_id && user?.id && student.creator_id === user.id);
+                        return (
+                          <button
+                            onClick={() => handleDeleteStudent(student)}
+                            className="btn btn-danger btn-icon"
+                            title={canDelete ? 'Delete Student' : 'Only workspace creator or Admin can delete'}
+                            style={!canDelete ? { opacity: 0.45, cursor: 'not-allowed' } : {}}
+                          >
+                            <Trash2 size={15} />
+                          </button>
+                        );
+                      })()}
                     </div>
                   </td>
                 </tr>
@@ -414,6 +481,133 @@ const Students = () => {
             )}
           </tbody>
         </table>
+      </div>
+
+      {/* Mobile Student Cards (< 768px Viewports) */}
+      <div className="mobile-student-cards">
+        {loading ? (
+          <div className="card text-center" style={{ padding: '2.5rem', color: 'var(--text-secondary)' }}>
+            Loading students...
+          </div>
+        ) : students.length === 0 ? (
+          <div className="card text-center" style={{ padding: '2.5rem', color: 'var(--text-secondary)' }}>
+            No students found. Tap "Add New Student" to get started!
+          </div>
+        ) : (
+          students.map((student) => {
+            const canDelete = isAdmin || Boolean(student.creator_id && user?.id && student.creator_id === user.id);
+            const parentPhoneClean = student.parent_phone ? student.parent_phone.replace(/[^0-9]/g, '') : '';
+            return (
+              <div key={`mob-${student.id}`} className="student-mobile-card">
+                <div className="student-card-top">
+                  <span className="student-roll-chip">{student.roll_number}</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div className="student-card-name">{student.full_name}</div>
+                    <div className="student-card-meta">
+                      <span className={`badge ${student.is_active ? 'badge-active' : 'badge-inactive'}`}>
+                        {student.is_active ? 'Active' : 'Inactive'}
+                      </span>
+                      {student.consent_given ? (
+                        <span className="badge badge-success" style={{ fontSize: '0.7rem' }}>
+                          <ShieldCheck size={12} /> Consent Active
+                        </span>
+                      ) : (
+                        <span className="badge badge-muted" style={{ fontSize: '0.7rem' }}>
+                          No Consent
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Parent Contact Details & WhatsApp / Call CTA */}
+                {student.parent_name && (
+                  <div className="student-card-parent-box">
+                    <div className="parent-info-text">
+                      <div style={{ fontWeight: 700, fontSize: '0.8rem', color: 'var(--text-primary)' }}>
+                        Parent: {student.parent_name}
+                      </div>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                        {student.parent_phone || 'No phone recorded'}
+                      </div>
+                    </div>
+                    {parentPhoneClean && (
+                      <div style={{ display: 'flex', gap: '0.4rem' }}>
+                        <a
+                          href={`https://wa.me/${parentPhoneClean}?text=${encodeURIComponent(
+                            `Hello ${student.parent_name}, this is an update regarding ${student.full_name} (${student.roll_number}).`
+                          )}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="btn-quick-wa"
+                          title="Chat with parent on WhatsApp"
+                        >
+                          <MessageSquare size={13} /> WhatsApp
+                        </a>
+                        <a
+                          href={`tel:${parentPhoneClean}`}
+                          className="btn-quick-call"
+                          title="Call parent"
+                        >
+                          <Phone size={13} /> Call
+                        </a>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Email / Phone info */}
+                {(student.email || student.phone) && (
+                  <div className="student-card-contact-row">
+                    {student.email && (
+                      <span className="contact-item">
+                        <Mail size={12} /> {student.email}
+                      </span>
+                    )}
+                    {student.phone && (
+                      <span className="contact-item">
+                        <Phone size={12} /> {student.phone}
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                {/* Touch-Friendly Action Buttons */}
+                <div className="student-card-actions">
+                  <button
+                    onClick={() => handleOpenFaceModal(student)}
+                    className="btn btn-secondary btn-sm"
+                    style={{ flex: 1, justifyContent: 'center', gap: '0.35rem', color: 'var(--primary)', fontWeight: 600 }}
+                  >
+                    <Camera size={15} /> Face Data
+                  </button>
+                  <button
+                    onClick={() => handleOpenEditModal(student)}
+                    className="btn btn-secondary btn-sm"
+                    style={{ flex: 1, justifyContent: 'center', gap: '0.35rem', fontWeight: 600 }}
+                  >
+                    <Edit2 size={14} /> Edit
+                  </button>
+                  <button
+                    onClick={() => handleDeleteStudent(student)}
+                    className="btn btn-danger btn-sm"
+                    style={{
+                      flex: canDelete ? 1 : 0.8,
+                      justifyContent: 'center',
+                      gap: '0.35rem',
+                      opacity: canDelete ? 1 : 0.45,
+                      cursor: canDelete ? 'pointer' : 'not-allowed',
+                      fontWeight: 600,
+                    }}
+                    title={canDelete ? 'Delete student' : 'Only workspace creator or Admin can delete'}
+                  >
+                    <Trash2 size={14} /> Delete
+                  </button>
+                </div>
+              </div>
+            );
+          })
+        )}
       </div>
 
       {/* Add / Edit Student Modal */}
@@ -496,6 +690,28 @@ const Students = () => {
                     placeholder="e.g. +91 9876543210"
                     value={formData.phone}
                     onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Parent / Guardian Name</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="e.g. Mr. Vikram Sharma"
+                    value={formData.parent_name}
+                    onChange={(e) => setFormData({ ...formData, parent_name: e.target.value })}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Parent WhatsApp / Phone</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="e.g. +91 9811100201"
+                    value={formData.parent_phone}
+                    onChange={(e) => setFormData({ ...formData, parent_phone: e.target.value })}
                   />
                 </div>
 
@@ -808,6 +1024,102 @@ const Students = () => {
         overlayType="portrait"
         defaultFacingMode="user"
       />
+
+      {/* Biometric Data Retention Purge Modal (DPDP Compliance) */}
+      {isRetentionModalOpen && (
+        <div
+          className="modal-overlay"
+          style={{
+            zIndex: 100,
+            backgroundColor: 'rgba(0,0,0,0.6)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <div
+            className="modal-content"
+            style={{
+              maxWidth: '500px',
+              width: '90%',
+              borderRadius: '14px',
+              padding: '1.5rem',
+              backgroundColor: '#ffffff',
+              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.25)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', marginBottom: '1rem' }}>
+              <div
+                style={{
+                  width: '38px',
+                  height: '38px',
+                  borderRadius: '10px',
+                  backgroundColor: '#fee2e2',
+                  color: '#dc2626',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <ShieldCheck size={22} />
+              </div>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700 }}>
+                  Biometric Data Retention Control
+                </h3>
+                <span className="badge badge-warning" style={{ fontSize: '0.72rem', marginTop: '2px' }}>
+                  DPDP Act & GDPR Privacy Compliance
+                </span>
+              </div>
+            </div>
+
+            <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', lineHeight: '1.5', marginBottom: '1rem' }}>
+              In accordance with strict biometric privacy principles and the Digital Personal Data Protection (DPDP) Act,
+              institutes must not retain biometric vectors for students who are no longer enrolled.
+            </p>
+
+            <div
+              style={{
+                backgroundColor: '#f8fafc',
+                border: '1px solid #e2e8f0',
+                borderRadius: '8px',
+                padding: '0.85rem',
+                marginBottom: '1.25rem',
+                fontSize: '0.825rem',
+              }}
+            >
+              <div style={{ fontWeight: 600, marginBottom: '0.35rem', color: 'var(--text-primary)' }}>
+                This automated action will:
+              </div>
+              <ul style={{ margin: 0, paddingLeft: '1.2rem', color: 'var(--text-secondary)' }}>
+                <li>Permanently erase high-dimensional facial embeddings for all <strong>inactive</strong> students.</li>
+                <li>Preserve academic attendance session records for dispute inspection.</li>
+                <li>Leave active enrolled students completely untouched.</li>
+              </ul>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
+              <button
+                type="button"
+                onClick={() => setIsRetentionModalOpen(false)}
+                disabled={purgingBiometrics}
+                className="btn btn-secondary"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handlePurgeInactiveFaces}
+                disabled={purgingBiometrics}
+                className="btn btn-danger"
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}
+              >
+                <Trash2 size={15} /> {purgingBiometrics ? 'Purging...' : 'Execute Biometric Purge'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

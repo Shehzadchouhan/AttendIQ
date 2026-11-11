@@ -34,12 +34,17 @@ class BatchStudentAttendanceItem(BaseModel):
     student_id: int
     roll_number: str
     full_name: str
+    parent_name: Optional[str] = None
+    parent_phone: Optional[str] = None
     present_count: int
     absent_count: int
     late_count: int
     total_sessions: int
     attendance_percentage: float
     is_low_attendance: bool
+    is_at_risk: bool = False
+    at_risk_reason: Optional[str] = None
+    consecutive_absent_count: int = 0
 
     model_config = ConfigDict(from_attributes=True)
 

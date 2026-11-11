@@ -271,8 +271,8 @@ const Batches = () => {
         </div>
       )}
 
-      {/* Batches Table */}
-      <div className="table-container">
+      {/* Batches Table (Desktop Viewport) */}
+      <div className="table-container desktop-only">
         <table className="data-table">
           <thead>
             <tr>
@@ -365,6 +365,100 @@ const Batches = () => {
             )}
           </tbody>
         </table>
+      </div>
+
+      {/* Mobile Batch Cards (< 768px Viewport) */}
+      <div className="mobile-batch-cards">
+        {loading ? (
+          <div className="card text-center" style={{ padding: '2.5rem', color: 'var(--text-secondary)' }}>
+            Loading batches...
+          </div>
+        ) : batches.length === 0 ? (
+          <div className="card text-center" style={{ padding: '2.5rem', color: 'var(--text-secondary)' }}>
+            {isAdmin
+              ? 'No batches created yet. Tap "Create New Batch" to add one!'
+              : 'You currently have no batches assigned to you.'}
+          </div>
+        ) : (
+          batches.map((batch) => {
+            const isMyBatch = Boolean(user?.name && batch.teacher_name && batch.teacher_name.toLowerCase().includes(user.name.toLowerCase().split(' ').pop()));
+            return (
+              <div key={`mob-batch-${batch.id}`} className="batch-mobile-card">
+                <div className="batch-card-top">
+                  <div>
+                    <h4 className="batch-card-name">{batch.name}</h4>
+                    <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', marginTop: '0.25rem', flexWrap: 'wrap' }}>
+                      <span className="badge" style={{ backgroundColor: '#eef2ff', color: 'var(--primary)' }}>
+                        {batch.subject}
+                      </span>
+                      {isMyBatch && (
+                        <span className="badge" style={{ backgroundColor: '#dcfce7', color: '#15803d' }}>
+                          Your Batch
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <span className="batch-id-chip">#{batch.id}</span>
+                </div>
+
+                <div className="batch-card-details">
+                  <div className="detail-item">
+                    <UserCheck size={14} color="var(--primary)" />
+                    <span>Faculty: <strong>{batch.teacher_name || 'Unassigned'}</strong></span>
+                  </div>
+                  <button
+                    onClick={() => handleOpenEnrollModal(batch)}
+                    className="btn btn-secondary btn-sm"
+                    style={{ gap: '0.35rem', padding: '0.3rem 0.65rem', fontWeight: 600 }}
+                  >
+                    <Users size={14} /> {batch.enrolled_count} Students
+                  </button>
+                </div>
+
+                {batch.description && (
+                  <p style={{ margin: '0.5rem 0', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                    {batch.description}
+                  </p>
+                )}
+
+                <div className="batch-card-actions">
+                  <button
+                    onClick={() => handleOpenHistoryModal(batch)}
+                    className="btn btn-secondary btn-sm"
+                    style={{ flex: 1.2, justifyContent: 'center', gap: '0.35rem', fontWeight: 600 }}
+                    title="Inspect past attendance dates & audit trail"
+                  >
+                    <Calendar size={14} /> History
+                  </button>
+                  <button
+                    onClick={() => handleOpenEnrollModal(batch)}
+                    className="btn btn-secondary btn-sm"
+                    style={{ flex: 1, justifyContent: 'center', gap: '0.35rem', fontWeight: 600 }}
+                  >
+                    <Users size={14} /> Enroll
+                  </button>
+                  <button
+                    onClick={() => handleOpenEditBatch(batch)}
+                    className="btn btn-secondary btn-sm"
+                    style={{ flex: 0.8, justifyContent: 'center', gap: '0.35rem', fontWeight: 600 }}
+                  >
+                    <Edit2 size={14} /> Edit
+                  </button>
+                  {isAdmin && (
+                    <button
+                      onClick={() => handleDeleteBatch(batch.id, batch.name)}
+                      className="btn btn-danger btn-sm"
+                      style={{ justifyContent: 'center', padding: '0.4rem 0.65rem' }}
+                      title="Delete Batch"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })
+        )}
       </div>
 
       {/* Add / Edit Batch Modal */}

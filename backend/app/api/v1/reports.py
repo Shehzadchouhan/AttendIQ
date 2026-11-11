@@ -190,6 +190,9 @@ def _calculate_batch_report_data(
         present_count = 0
         absent_count = 0
         late_count = 0
+        consecutive_absent = 0
+        is_at_risk = False
+        at_risk_reason = None
 
         if session_ids:
             records = (
@@ -204,6 +207,36 @@ def _calculate_batch_report_data(
             absent_count = sum(1 for r in records if r.status == "absent")
             late_count = sum(1 for r in records if r.status == "late")
 
+            record_by_session = {r.session_id: r.status for r in records}
+
+            # 1. Consecutive absences (scan from latest session backwards)
+            for sess in reversed(sessions):
+                st = record_by_session.get(sess.id)
+                if st == "absent":
+                    consecutive_absent += 1
+                elif st in ["present", "late"]:
+                    break
+
+            if consecutive_absent >= 3:
+                is_at_risk = True
+                at_risk_reason = f"{consecutive_absent} consecutive absences"
+            elif len(sessions) >= 4:
+                # 2. Week-over-week / recent rate drop (recent half vs prior half)
+                mid = len(sessions) // 2
+                prior_sessions = sessions[:mid]
+                recent_sessions = sessions[mid:]
+
+                prior_present = sum(1 for sess in prior_sessions if record_by_session.get(sess.id) in ["present", "late"])
+                prior_pct = (prior_present / len(prior_sessions) * 100) if prior_sessions else 0.0
+
+                recent_present = sum(1 for sess in recent_sessions if record_by_session.get(sess.id) in ["present", "late"])
+                recent_pct = (recent_present / len(recent_sessions) * 100) if recent_sessions else 0.0
+
+                drop = prior_pct - recent_pct
+                if drop >= 15.0:
+                    is_at_risk = True
+                    at_risk_reason = f"Dropped {round(drop, 1)}% recently"
+
         pct = (
             round(((present_count + late_count) / total_sessions * 100), 2)
             if total_sessions > 0 else 0.0
@@ -217,12 +250,17 @@ def _calculate_batch_report_data(
                 student_id=s.id,
                 roll_number=s.roll_number,
                 full_name=s.full_name,
+                parent_name=s.parent_name,
+                parent_phone=s.parent_phone,
                 present_count=present_count,
                 absent_count=absent_count,
                 late_count=late_count,
                 total_sessions=total_sessions,
                 attendance_percentage=pct,
-                is_low_attendance=is_low
+                is_low_attendance=is_low,
+                is_at_risk=is_at_risk,
+                at_risk_reason=at_risk_reason,
+                consecutive_absent_count=consecutive_absent
             )
         )
 
@@ -309,26 +347,33 @@ def export_batch_attendance_csv(
     writer.writerow([
         "Roll Number",
         "Student Name",
+        "Parent Name",
+        "Parent Phone",
         "Present Days",
         "Absent Days",
         "Late Days",
         "Total Sessions",
         "Attendance Percentage (%)",
-        "Alert Status"
+        "Alert Status",
+        "Risk Warning"
     ])
 
     # Write Student Rows
     for s in report.students:
         status_text = "LOW ATTENDANCE ALERT" if s.is_low_attendance else "Good"
+        risk_text = f"AT RISK ({s.at_risk_reason})" if s.is_at_risk else "Normal"
         writer.writerow([
             s.roll_number,
             s.full_name,
+            s.parent_name or "N/A",
+            s.parent_phone or "N/A",
             s.present_count,
             s.absent_count,
             s.late_count,
             s.total_sessions,
             f"{s.attendance_percentage:.1f}%",
-            status_text
+            status_text,
+            risk_text
         ])
 
     csv_data = output.getvalue()

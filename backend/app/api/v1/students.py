@@ -7,7 +7,8 @@ from sqlalchemy import or_, func
 from app.core.config import settings
 from app.core.database import get_db
 from app.models.student import Student, FaceEmbedding
-from app.models.user import User
+from app.models.batch import Batch, Enrollment
+from app.models.user import User, UserRole
 from app.schemas.student import (
     StudentCreate,
     StudentUpdate,
@@ -30,10 +31,26 @@ def list_students(
     current_user: User = Depends(get_current_user)
 ):
     """
-    Retrieve all registered students with optional search filter and pagination.
-    Available to both Admins and Teachers.
+    Retrieve registered students with optional search filter and pagination.
+    Multi-tenant isolation: Tutors only see students they created or enrolled in their batches.
+    Admins can see all students across the institute.
     """
     query = db.query(Student)
+
+    if current_user.role != UserRole.ADMIN.value:
+        taught_batch_student_ids = (
+            db.query(Enrollment.student_id)
+            .join(Batch, Batch.id == Enrollment.batch_id)
+            .filter(Batch.teacher_id == current_user.id)
+            .scalar_subquery()
+        )
+        query = query.filter(
+            or_(
+                Student.creator_id == current_user.id,
+                Student.id.in_(taught_batch_student_ids)
+            )
+        )
+
     if search:
         search_filter = f"%{search}%"
         query = query.filter(
@@ -52,14 +69,20 @@ def create_student(
     current_user: User = Depends(get_current_user)
 ):
     """
-    Register a new student.
-    Ensures roll number is unique across all students.
+    Register a new student within the authenticated tutor's workspace.
+    Ensures roll number is unique within this tutor's workspace.
     """
-    existing_student = db.query(Student).filter(Student.roll_number == student_in.roll_number).first()
+    dup_query = db.query(Student).filter(Student.roll_number == student_in.roll_number)
+    if current_user.role != UserRole.ADMIN.value:
+        dup_query = dup_query.filter(Student.creator_id == current_user.id)
+    else:
+        dup_query = dup_query.filter(or_(Student.creator_id == current_user.id, Student.creator_id.is_(None)))
+
+    existing_student = dup_query.first()
     if existing_student:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Student with roll number '{student_in.roll_number}' already exists."
+            detail=f"Student with roll number '{student_in.roll_number}' already exists in your workspace."
         )
 
     new_student = Student(
@@ -67,13 +90,50 @@ def create_student(
         full_name=student_in.full_name,
         email=student_in.email,
         phone=student_in.phone,
+        parent_name=student_in.parent_name,
+        parent_phone=student_in.parent_phone,
         is_active=student_in.is_active,
+        creator_id=current_user.id,
         consent_given=False
     )
     db.add(new_student)
     db.commit()
     db.refresh(new_student)
     return new_student
+
+
+@router.post("/privacy/purge-inactive-faces", summary="Purge Face Embeddings for Inactive Students (Admin Only)")
+def purge_inactive_faces(
+    db: Session = Depends(get_db),
+    admin_user: User = Depends(require_admin)
+):
+    """
+    Biometric Data Retention Control (DPDP Act / GDPR compliance):
+    Permanently purges face embeddings for inactive / graduated students.
+    Admin-only operation supporting privacy-by-design.
+    """
+    inactive_students = db.query(Student).filter(Student.is_active == False).all()
+    inactive_ids = [s.id for s in inactive_students]
+
+    if not inactive_ids:
+        return {
+            "purged_students_count": 0,
+            "deleted_embeddings_count": 0,
+            "message": "No inactive students found. All registered students are currently active."
+        }
+
+    deleted_count = (
+        db.query(FaceEmbedding)
+        .filter(FaceEmbedding.student_id.in_(inactive_ids))
+        .delete(synchronize_session=False)
+    )
+    db.commit()
+
+    return {
+        "purged_students_count": len(inactive_ids),
+        "deleted_embeddings_count": deleted_count,
+        "message": f"Successfully purged {deleted_count} biometric embedding(s) for {len(inactive_ids)} inactive student(s)."
+    }
 
 
 @router.get("/{student_id}", response_model=StudentResponse, summary="Get Student by ID")
@@ -84,14 +144,9 @@ def get_student(
 ):
     """
     Fetch a single student by primary key ID.
+    Enforces multi-tenant workspace isolation.
     """
-    student = db.query(Student).filter(Student.id == student_id).first()
-    if not student:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Student with ID {student_id} not found."
-        )
-    return student
+    return verify_student_access(student_id, current_user, db)
 
 
 @router.put("/{student_id}", response_model=StudentResponse, summary="Update Student")
@@ -103,25 +158,26 @@ def update_student(
 ):
     """
     Update student profile details.
-    Validates roll number conflict if changed.
+    Validates roll number conflict within this workspace if changed.
     """
-    student = db.query(Student).filter(Student.id == student_id).first()
-    if not student:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Student with ID {student_id} not found."
-        )
+    student = verify_student_access(student_id, current_user, db)
 
     # Check roll number uniqueness if updated
     if student_in.roll_number and student_in.roll_number != student.roll_number:
-        duplicate = db.query(Student).filter(
+        dup_query = db.query(Student).filter(
             Student.roll_number == student_in.roll_number,
             Student.id != student_id
-        ).first()
+        )
+        if current_user.role != UserRole.ADMIN.value:
+            dup_query = dup_query.filter(Student.creator_id == current_user.id)
+        else:
+            dup_query = dup_query.filter(or_(Student.creator_id == current_user.id, Student.creator_id.is_(None)))
+
+        duplicate = dup_query.first()
         if duplicate:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Another student with roll number '{student_in.roll_number}' already exists."
+                detail=f"Another student with roll number '{student_in.roll_number}' already exists in your workspace."
             )
         student.roll_number = student_in.roll_number
 
@@ -131,6 +187,10 @@ def update_student(
         student.email = student_in.email
     if student_in.phone is not None:
         student.phone = student_in.phone
+    if student_in.parent_name is not None:
+        student.parent_name = student_in.parent_name
+    if student_in.parent_phone is not None:
+        student.parent_phone = student_in.parent_phone
     if student_in.is_active is not None:
         student.is_active = student_in.is_active
 
@@ -139,15 +199,15 @@ def update_student(
     return student
 
 
-@router.delete("/{student_id}", status_code=status.HTTP_204_NO_CONTENT, summary="Delete Student (Admin Only)")
+@router.delete("/{student_id}", status_code=status.HTTP_204_NO_CONTENT, summary="Delete Student")
 def delete_student(
     student_id: int,
     db: Session = Depends(get_db),
-    admin_user: User = Depends(require_admin)
+    current_user: User = Depends(get_current_user)
 ):
     """
     Delete a student from the system.
-    Restricted to Admins.
+    Admins can delete any student; Tutors can delete students created in their workspace.
     Cascade automatically removes associated enrollments and embeddings.
     """
     student = db.query(Student).filter(Student.id == student_id).first()
@@ -155,6 +215,12 @@ def delete_student(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Student with ID {student_id} not found."
+        )
+
+    if current_user.role != UserRole.ADMIN.value and student.creator_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to delete this student."
         )
 
     db.delete(student)

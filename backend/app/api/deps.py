@@ -83,18 +83,21 @@ def verify_student_access(
         )
 
     if current_user.role != UserRole.ADMIN.value:
-        # Check if student is enrolled in any batch taught by this teacher
-        has_enrollment = db.query(Enrollment.id).join(
-            Batch, Batch.id == Enrollment.batch_id
-        ).filter(
-            Enrollment.student_id == student_id,
-            Batch.teacher_id == current_user.id
-        ).first()
+        # Multi-tenant isolation: allow if teacher created the student OR teaches the student in a batch
+        is_creator = (student.creator_id == current_user.id)
+        has_enrollment = False
+        if not is_creator:
+            has_enrollment = db.query(Enrollment.id).join(
+                Batch, Batch.id == Enrollment.batch_id
+            ).filter(
+                Enrollment.student_id == student_id,
+                Batch.teacher_id == current_user.id
+            ).first() is not None
 
-        if not has_enrollment:
+        if not is_creator and not has_enrollment:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="You do not have permission to access face data for this student."
+                detail="You do not have permission to access face data or records for this student."
             )
 
     return student

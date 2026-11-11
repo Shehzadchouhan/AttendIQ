@@ -4,6 +4,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import { BrowserRouter } from 'react-router-dom';
 import Students from '../pages/Students';
 import { AuthContext } from '../context/AuthContext';
+import { ToastProvider } from '../context/ToastContext';
 import apiClient from '../api/client';
 
 vi.mock('../api/client', () => ({
@@ -39,11 +40,13 @@ const mockStudentsData = [
 
 const renderStudents = (isAdmin = true) => {
   return render(
-    <AuthContext.Provider value={{ user: { email: 'admin@facemark.local' }, isAdmin }}>
-      <BrowserRouter>
-        <Students />
-      </BrowserRouter>
-    </AuthContext.Provider>
+    <ToastProvider>
+      <AuthContext.Provider value={{ user: { id: 1, email: 'admin@facemark.local' }, isAdmin }}>
+        <BrowserRouter>
+          <Students />
+        </BrowserRouter>
+      </AuthContext.Provider>
+    </ToastProvider>
   );
 };
 
@@ -67,10 +70,10 @@ describe('Students Page Smoke Tests', () => {
     renderStudents(true);
 
     await waitFor(() => {
-      expect(screen.getByText('STU-101')).toBeInTheDocument();
-      expect(screen.getByText('Aarav Sharma')).toBeInTheDocument();
-      expect(screen.getByText('STU-102')).toBeInTheDocument();
-      expect(screen.getByText('Diya Patel')).toBeInTheDocument();
+      expect(screen.getAllByText('STU-101').length).toBeGreaterThanOrEqual(1);
+      expect(screen.getAllByText('Aarav Sharma').length).toBeGreaterThanOrEqual(1);
+      expect(screen.getAllByText('STU-102').length).toBeGreaterThanOrEqual(1);
+      expect(screen.getAllByText('Diya Patel').length).toBeGreaterThanOrEqual(1);
     });
   });
 

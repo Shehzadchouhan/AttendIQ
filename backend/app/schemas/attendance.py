@@ -60,11 +60,35 @@ class AttendanceSessionResponse(BaseModel):
     taken_by_user_id: Optional[int] = None
     taken_by_user_name: Optional[str] = None
     unrecognized_count: int = 0
+    is_locked: bool = False
+    locked_at: Optional[datetime] = None
+    unlock_reason: Optional[str] = None
     present_count: int = 0
     absent_count: int = 0
     late_count: int = 0
     total_enrolled: int = 0
     created_at: datetime
     records: Optional[List[AttendanceRecordResponse]] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class SessionUnlockRequest(BaseModel):
+    reason: str = Field(..., min_length=3, max_length=500, description="Audit reason for unlocking historical attendance session")
+
+
+class AttendanceAuditLogResponse(BaseModel):
+    id: int
+    session_id: int
+    student_id: Optional[int] = None
+    student_name: Optional[str] = None
+    roll_number: Optional[str] = None
+    changed_by_user_id: Optional[int] = None
+    changed_by_user_name: Optional[str] = None
+    previous_status: Optional[str] = None
+    new_status: Optional[str] = None
+    action: str
+    reason: Optional[str] = None
+    timestamp: datetime
 
     model_config = ConfigDict(from_attributes=True)

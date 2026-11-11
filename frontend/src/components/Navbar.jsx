@@ -42,7 +42,7 @@ const Navbar = ({ onToggleNav, isMobileOpen }) => {
           <div className="navbar-user-details">
             <span className="navbar-user-name">{user?.name || user?.email}</span>
             <span className="navbar-user-sub">
-              {isAdmin ? 'Administrator' : 'Faculty Member'}
+              {isAdmin ? 'System Administrator' : (user?.institution_name || 'Independent Tutor')}
             </span>
           </div>
         </div>

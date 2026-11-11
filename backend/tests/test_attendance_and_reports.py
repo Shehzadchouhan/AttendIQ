@@ -296,7 +296,7 @@ def test_batch_report_and_csv_export(client, setup_data, db_session):
     assert res_csv.status_code == 200
     assert "text/csv" in res_csv.headers["content-type"]
     csv_text = res_csv.text
-    assert "Roll Number,Student Name,Present Days,Absent Days" in csv_text
+    assert "Roll Number,Student Name,Parent Name,Parent Phone,Present Days" in csv_text
     assert "Alice Smith" in csv_text
     assert "Bob Jones" in csv_text
     assert "LOW ATTENDANCE ALERT" in csv_text
@@ -336,3 +336,92 @@ def test_teacher_vs_admin_rbac(client, setup_data, db_session):
     # Admin viewing report for Teacher 2's batch -> 200 OK
     res_admin_rep = client.get(f"/api/v1/reports/batch/{batch2.id}", headers=admin_headers)
     assert res_admin_rep.status_code == 200
+
+
+# ============================================================================
+# 7. SESSION LOCKING & AUDIT TRAIL
+# ============================================================================
+def test_session_locking_and_audit_trail(client, setup_data, db_session):
+    admin = setup_data["admin"]
+    teacher1 = setup_data["teacher1"]
+    batch1 = setup_data["batch1"]
+    student1 = setup_data["student1"]
+    student2 = setup_data["student2"]
+
+    t1_headers = get_auth_headers(teacher1)
+    admin_headers = get_auth_headers(admin)
+
+    # Create and confirm a session
+    sess_date = date.today() - timedelta(days=2)
+    s = AttendanceSession(batch_id=batch1.id, session_date=sess_date, status="scheduled", taken_by_user_id=teacher1.id)
+    db_session.add(s)
+    db_session.commit()
+
+    confirm_payload = {
+        "records": [
+            {"student_id": student1.id, "status": "present", "method": "manual"},
+            {"student_id": student2.id, "status": "absent", "method": "manual"}
+        ]
+    }
+    res_confirm = client.post(f"/api/v1/attendance/sessions/{s.id}/confirm", json=confirm_payload, headers=t1_headers)
+    assert res_confirm.status_code == 200
+
+    # Lock session (Admin only)
+    res_lock = client.post(f"/api/v1/attendance/sessions/{s.id}/lock", headers=admin_headers)
+    assert res_lock.status_code == 200
+    assert res_lock.json()["is_locked"] is True
+
+    # Teacher attempting to modify locked session -> 423 Locked
+    res_teacher_edit = client.post(f"/api/v1/attendance/sessions/{s.id}/confirm", json=confirm_payload, headers=t1_headers)
+    assert res_teacher_edit.status_code == 423
+    assert "locked" in res_teacher_edit.json()["detail"].lower()
+
+    # Admin unlocks session with audit reason
+    unlock_payload = {"reason": "Teacher requested status correction for STU-002"}
+    res_unlock = client.post(f"/api/v1/attendance/sessions/{s.id}/unlock", json=unlock_payload, headers=admin_headers)
+    assert res_unlock.status_code == 200
+    assert res_unlock.json()["is_locked"] is False
+    assert res_unlock.json()["unlock_reason"] == unlock_payload["reason"]
+
+    # Check Audit Logs
+    res_audit = client.get(f"/api/v1/attendance/sessions/{s.id}/audit-logs", headers=t1_headers)
+    assert res_audit.status_code == 200
+    logs = res_audit.json()
+    assert len(logs) >= 3  # initial confirms + session_locked + session_unlocked
+    actions = [log["action"] for log in logs]
+    assert "session_unlocked" in actions
+    assert "session_locked" in actions
+
+
+# ============================================================================
+# 8. AT-RISK BADGE & PARENT CONTACT IN REPORTS
+# ============================================================================
+def test_at_risk_and_parent_contact(client, setup_data, db_session):
+    teacher1 = setup_data["teacher1"]
+    batch1 = setup_data["batch1"]
+    student1 = setup_data["student1"]
+    headers = get_auth_headers(teacher1)
+
+    # Set parent details on student1
+    student1.parent_name = "Mr. Test Smith"
+    student1.parent_phone = "+919876543299"
+    db_session.commit()
+
+    # Create 3 past sessions where student1 was consecutively absent
+    for i in range(3, 0, -1):
+        sess = AttendanceSession(batch_id=batch1.id, session_date=date.today() - timedelta(days=i), status="completed")
+        db_session.add(sess)
+        db_session.commit()
+        rec = AttendanceRecord(session_id=sess.id, student_id=student1.id, status="absent", is_confirmed=True)
+        db_session.add(rec)
+    db_session.commit()
+
+    # Get batch report
+    res = client.get(f"/api/v1/reports/batch/{batch1.id}", headers=headers)
+    assert res.status_code == 200
+    stu_report = next((s for s in res.json()["students"] if s["student_id"] == student1.id), None)
+    assert stu_report is not None
+    assert stu_report["parent_name"] == "Mr. Test Smith"
+    assert stu_report["parent_phone"] == "+919876543299"
+    assert stu_report["is_at_risk"] is True
+    assert "consecutive absences" in stu_report["at_risk_reason"].lower()

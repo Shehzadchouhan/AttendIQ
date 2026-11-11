@@ -20,11 +20,18 @@ import {
   Printer,
   Copy,
   Share2,
+  Lock,
+  Unlock,
+  History,
+  Shield,
+  FileText,
 } from 'lucide-react';
 import apiClient from '../api/client';
+import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 
 const SessionHistoryModal = ({ isOpen, onClose, batch }) => {
+  const { isAdmin } = useAuth();
   const { toast } = useToast();
 
   const [sessionsList, setSessionsList] = useState([]);
@@ -33,6 +40,14 @@ const SessionHistoryModal = ({ isOpen, onClose, batch }) => {
   const [loadingSessions, setLoadingSessions] = useState(false);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [searchFilter, setSearchFilter] = useState('');
+
+  // Audit Trail & Locking State
+  const [activeTab, setActiveTab] = useState('roster'); // 'roster' | 'audit'
+  const [auditLogs, setAuditLogs] = useState([]);
+  const [loadingAudit, setLoadingAudit] = useState(false);
+  const [isUnlockModalOpen, setIsUnlockModalOpen] = useState(false);
+  const [unlockReason, setUnlockReason] = useState('');
+  const [submittingLock, setSubmittingLock] = useState(false);
 
   // 1. Fetch sessions list when modal opens or batch changes
   useEffect(() => {
@@ -72,6 +87,7 @@ const SessionHistoryModal = ({ isOpen, onClose, batch }) => {
   useEffect(() => {
     if (!selectedSessionId) {
       setSessionDetail(null);
+      setAuditLogs([]);
       return;
     }
 
@@ -89,7 +105,67 @@ const SessionHistoryModal = ({ isOpen, onClose, batch }) => {
     };
 
     fetchSessionDetail();
+    fetchAuditLogs(selectedSessionId);
   }, [selectedSessionId]);
+
+  const fetchAuditLogs = async (sessionId) => {
+    if (!sessionId) return;
+    try {
+      setLoadingAudit(true);
+      const res = await apiClient.get(`/attendance/sessions/${sessionId}/audit-logs`);
+      setAuditLogs(res.data || []);
+    } catch (err) {
+      console.error('Failed to load audit logs', err);
+    } finally {
+      setLoadingAudit(false);
+    }
+  };
+
+  const handleLockSession = async () => {
+    if (!selectedSessionId) return;
+    try {
+      setSubmittingLock(true);
+      const res = await apiClient.post(`/attendance/sessions/${selectedSessionId}/lock`);
+      setSessionDetail(res.data);
+      setSessionsList((prev) =>
+        prev.map((s) => (s.id === selectedSessionId ? { ...s, is_locked: true } : s))
+      );
+      toast.success('Session locked. 24-hour integrity protection active.');
+      fetchAuditLogs(selectedSessionId);
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to lock session.');
+    } finally {
+      setSubmittingLock(false);
+    }
+  };
+
+  const handleUnlockSession = async (e) => {
+    e.preventDefault();
+    if (!unlockReason.trim()) {
+      toast.error('Please enter a valid audit reason for unlocking.');
+      return;
+    }
+    try {
+      setSubmittingLock(true);
+      const res = await apiClient.post(`/attendance/sessions/${selectedSessionId}/unlock`, {
+        reason: unlockReason.trim(),
+      });
+      setSessionDetail(res.data);
+      setSessionsList((prev) =>
+        prev.map((s) =>
+          s.id === selectedSessionId ? { ...s, is_locked: false, unlock_reason: unlockReason.trim() } : s
+        )
+      );
+      setIsUnlockModalOpen(false);
+      setUnlockReason('');
+      toast.success('Session unlocked. Verifiable audit entry recorded.');
+      fetchAuditLogs(selectedSessionId);
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to unlock session.');
+    } finally {
+      setSubmittingLock(false);
+    }
+  };
 
   if (!isOpen || !batch) return null;
 
@@ -253,6 +329,7 @@ const SessionHistoryModal = ({ isOpen, onClose, batch }) => {
             <>
               {/* Session Selector & Stepper Bar */}
               <div
+                className="session-stepper-bar"
                 style={{
                   display: 'flex',
                   alignItems: 'center',
@@ -343,7 +420,7 @@ const SessionHistoryModal = ({ isOpen, onClose, batch }) => {
                     }}
                   >
                     <div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
                         <h4 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 800, color: 'var(--text-primary)' }}>
                           {new Date(sessionDetail.session_date).toLocaleDateString('en-US', {
                             weekday: 'long',
@@ -355,9 +432,93 @@ const SessionHistoryModal = ({ isOpen, onClose, batch }) => {
                         <span className="badge badge-success">
                           <CheckCircle2 size={12} /> Confirmed Session
                         </span>
+
+                        {/* Session Integrity Locking Badge */}
+                        {sessionDetail.is_locked ? (
+                          <span
+                            className="badge badge-warning"
+                            style={{
+                              backgroundColor: '#fef3c7',
+                              color: '#92400e',
+                              border: '1px solid #fde68a',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '0.35rem',
+                              fontWeight: 700,
+                            }}
+                            title="Session locked 24 hours after confirmation to prevent roster tampering."
+                          >
+                            <Lock size={12} /> Locked (Integrity Protected)
+                          </span>
+                        ) : (
+                          <span
+                            className="badge badge-success"
+                            style={{
+                              backgroundColor: '#ecfdf5',
+                              color: '#065f46',
+                              border: '1px solid #a7f3d0',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '0.35rem',
+                              fontWeight: 600,
+                            }}
+                            title={
+                              sessionDetail.unlock_reason
+                                ? `Unlocked by Admin: "${sessionDetail.unlock_reason}"`
+                                : 'Session open for editing'
+                            }
+                          >
+                            <Unlock size={12} /> {sessionDetail.unlock_reason ? 'Unlocked (Audited)' : 'Open / Editable'}
+                          </span>
+                        )}
+
+                        {/* Admin Lock / Unlock Action Controls */}
+                        {isAdmin && (
+                          sessionDetail.is_locked ? (
+                            <button
+                              type="button"
+                              onClick={() => setIsUnlockModalOpen(true)}
+                              className="btn btn-secondary btn-sm"
+                              style={{
+                                padding: '2px 8px',
+                                fontSize: '0.72rem',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '3px',
+                                backgroundColor: '#f8fafc',
+                              }}
+                              title="Administrator unlock with verifiable justification"
+                            >
+                              <Unlock size={12} /> Admin Unlock
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={handleLockSession}
+                              disabled={submittingLock}
+                              className="btn btn-secondary btn-sm"
+                              style={{
+                                padding: '2px 8px',
+                                fontSize: '0.72rem',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '3px',
+                                backgroundColor: '#f8fafc',
+                              }}
+                              title="Manually lock session to prevent further roster edits"
+                            >
+                              <Lock size={12} /> Lock Now
+                            </button>
+                          )
+                        )}
                       </div>
                       <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>
                         Conducted by: <strong>{sessionDetail.taken_by_user_name || 'Assigned Faculty'}</strong>
+                        {sessionDetail.unlock_reason && (
+                          <span style={{ marginLeft: '8px', color: '#b45309', fontStyle: 'italic' }}>
+                            (Admin unlock reason: "{sessionDetail.unlock_reason}")
+                          </span>
+                        )}
                       </div>
                     </div>
 
@@ -425,7 +586,7 @@ const SessionHistoryModal = ({ isOpen, onClose, batch }) => {
                 </div>
               )}
 
-              {/* Roster Search & Filter */}
+              {/* Tab Switcher & Filter Bar */}
               <div
                 style={{
                   display: 'flex',
@@ -433,118 +594,262 @@ const SessionHistoryModal = ({ isOpen, onClose, batch }) => {
                   justifyContent: 'space-between',
                   marginBottom: '0.75rem',
                   gap: '0.75rem',
+                  flexWrap: 'wrap',
                 }}
               >
-                <div style={{ fontWeight: 700, fontSize: '0.95rem' }}>
-                  Confirmed Student Roster ({filteredRecords.length})
+                <div style={{ display: 'flex', gap: '0.4rem' }}>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('roster')}
+                    className={`btn btn-sm ${activeTab === 'roster' ? 'btn-primary' : 'btn-secondary'}`}
+                    style={{ gap: '0.35rem', padding: '0.35rem 0.75rem', fontSize: '0.8rem', fontWeight: 600 }}
+                  >
+                    <UserCheck size={14} /> Confirmed Roster ({filteredRecords.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveTab('audit');
+                      fetchAuditLogs(selectedSessionId);
+                    }}
+                    className={`btn btn-sm ${activeTab === 'audit' ? 'btn-primary' : 'btn-secondary'}`}
+                    style={{ gap: '0.35rem', padding: '0.35rem 0.75rem', fontSize: '0.8rem', fontWeight: 600 }}
+                  >
+                    <History size={14} /> Audit Trail ({auditLogs.length})
+                  </button>
                 </div>
-                <div className="search-input-wrapper" style={{ maxWidth: '260px' }}>
-                  <Search size={15} className="search-icon" />
-                  <input
-                    type="text"
-                    className="search-input select-sm"
-                    placeholder="Search student or roll..."
-                    value={searchFilter}
-                    onChange={(e) => setSearchFilter(e.target.value)}
-                  />
-                </div>
+
+                {activeTab === 'roster' && (
+                  <div className="search-input-wrapper" style={{ maxWidth: '240px' }}>
+                    <Search size={14} className="search-icon" />
+                    <input
+                      type="text"
+                      className="search-input select-sm"
+                      placeholder="Search roster..."
+                      value={searchFilter}
+                      onChange={(e) => setSearchFilter(e.target.value)}
+                    />
+                  </div>
+                )}
               </div>
 
-              {/* Confirmed Roster Records Table */}
-              {loadingDetail ? (
-                <div style={{ textAlign: 'center', padding: '2rem 0', color: 'var(--text-secondary)' }}>
-                  <RefreshCw size={22} className="spin" style={{ margin: '0 auto 0.5rem auto' }} />
-                  <div>Loading confirmed student records...</div>
-                </div>
-              ) : (
-                <div className="table-responsive" style={{ border: '1px solid var(--border-color)', borderRadius: '10px' }}>
-                  <table className="data-table" style={{ margin: 0 }}>
-                    <thead>
-                      <tr>
-                        <th>Roll Number</th>
-                        <th>Student Name</th>
-                        <th>Status</th>
-                        <th>Verification Method</th>
-                        <th>Marked Time</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredRecords.length === 0 ? (
+              {/* View 1: Audit Trail Table */}
+              {activeTab === 'audit' ? (
+                loadingAudit ? (
+                  <div style={{ textAlign: 'center', padding: '2rem 0', color: 'var(--text-secondary)' }}>
+                    <RefreshCw size={22} className="spin" style={{ margin: '0 auto 0.5rem auto' }} />
+                    <div>Loading session audit logs...</div>
+                  </div>
+                ) : auditLogs.length === 0 ? (
+                  <div
+                    style={{
+                      textAlign: 'center',
+                      padding: '2.5rem 1.5rem',
+                      background: '#f8fafc',
+                      borderRadius: '10px',
+                      border: '1px dashed var(--border-color)',
+                    }}
+                  >
+                    <History size={28} color="#94a3b8" style={{ margin: '0 auto 0.5rem auto' }} />
+                    <h5 style={{ margin: '0 0 0.25rem 0' }}>No Modifications Logged</h5>
+                    <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                      This session maintains its pristine initial state with zero overrides.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="table-responsive" style={{ border: '1px solid var(--border-color)', borderRadius: '10px' }}>
+                    <table className="data-table" style={{ margin: 0 }}>
+                      <thead>
                         <tr>
-                          <td colSpan="5" style={{ textAlign: 'center', padding: '1.5rem', color: 'var(--text-muted)' }}>
-                            No students match your search filter.
-                          </td>
+                          <th>Timestamp</th>
+                          <th>Action</th>
+                          <th>Changed By</th>
+                          <th>Target Student</th>
+                          <th>Status Change</th>
+                          <th>Verifiable Audit Reason</th>
                         </tr>
-                      ) : (
-                        filteredRecords.map((r) => (
-                          <tr key={r.id}>
-                            <td>
-                              <strong>{r.roll_number}</strong>
+                      </thead>
+                      <tbody>
+                        {auditLogs.map((log) => (
+                          <tr key={log.id}>
+                            <td style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
+                              {new Date(log.timestamp).toLocaleString([], {
+                                month: 'short',
+                                day: 'numeric',
+                                hour: '2-digit',
+                                minute: '2-digit',
+                              })}
                             </td>
-                            <td style={{ fontWeight: 600 }}>{r.student_name}</td>
                             <td>
-                              {r.status === 'present' ? (
-                                <span className="badge badge-success" style={{ gap: '0.3rem' }}>
-                                  <UserCheck size={13} /> Present
-                                </span>
-                              ) : r.status === 'absent' ? (
-                                <span className="badge badge-danger" style={{ gap: '0.3rem' }}>
-                                  <UserX size={13} /> Absent
-                                </span>
+                              <span
+                                className="badge"
+                                style={{
+                                  fontSize: '0.72rem',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '3px',
+                                  backgroundColor:
+                                    log.action === 'session_locked'
+                                      ? '#fef3c7'
+                                      : log.action === 'session_unlocked'
+                                      ? '#ecfdf5'
+                                      : log.action === 'manual_override'
+                                      ? '#f5f3ff'
+                                      : '#eff6ff',
+                                  color:
+                                    log.action === 'session_locked'
+                                      ? '#92400e'
+                                      : log.action === 'session_unlocked'
+                                      ? '#065f46'
+                                      : log.action === 'manual_override'
+                                      ? '#5b21b6'
+                                      : '#1e40af',
+                                  fontWeight: 600,
+                                }}
+                              >
+                                {log.action === 'session_locked' && <Lock size={11} />}
+                                {log.action === 'session_unlocked' && <Unlock size={11} />}
+                                {log.action === 'manual_override' && <Edit2 size={11} />}
+                                {log.action}
+                              </span>
+                            </td>
+                            <td style={{ fontWeight: 600, fontSize: '0.825rem' }}>
+                              {log.changed_by_user_name || 'System / Automated'}
+                            </td>
+                            <td>
+                              {log.student_name ? (
+                                <div style={{ fontSize: '0.825rem' }}>
+                                  <strong>{log.roll_number}</strong> — {log.student_name}
+                                </div>
                               ) : (
-                                <span className="badge badge-warning" style={{ gap: '0.3rem' }}>
-                                  <Clock size={13} /> Late
-                                </span>
+                                <span className="text-muted text-xs">Entire Session</span>
                               )}
                             </td>
                             <td>
-                              {/* Method Badge: Face Recognition vs Manual Override */}
-                              {r.method === 'face' ? (
-                                <span
-                                  className="badge"
-                                  style={{
-                                    backgroundColor: '#ecfdf5',
-                                    color: '#065f46',
-                                    border: '1px solid #a7f3d0',
-                                    gap: '0.35rem',
-                                    fontWeight: 600,
-                                  }}
-                                  title="Marked automatically by Face Recognition engine"
-                                >
-                                  <Camera size={13} color="#059669" />
-                                  Face Recognition
-                                  {r.confidence_score ? (
-                                    <span style={{ fontSize: '0.72rem', opacity: 0.85 }}>
-                                      ({Math.round(r.confidence_score * 100)}%)
-                                    </span>
-                                  ) : null}
+                              {log.previous_status && log.new_status ? (
+                                <span style={{ fontSize: '0.8rem', fontWeight: 600 }}>
+                                  <span style={{ textDecoration: 'line-through', opacity: 0.65 }}>
+                                    {log.previous_status}
+                                  </span>{' '}
+                                  →{' '}
+                                  <span style={{ color: log.new_status === 'present' ? '#16a34a' : '#dc2626' }}>
+                                    {log.new_status}
+                                  </span>
+                                </span>
+                              ) : log.new_status ? (
+                                <span className={`badge badge-${log.new_status === 'present' ? 'success' : 'danger'}`}>
+                                  {log.new_status}
                                 </span>
                               ) : (
-                                <span
-                                  className="badge"
-                                  style={{
-                                    backgroundColor: '#f5f3ff',
-                                    color: '#5b21b6',
-                                    border: '1px solid #ddd6fe',
-                                    gap: '0.35rem',
-                                    fontWeight: 600,
-                                  }}
-                                  title="Manually verified or overridden by teacher"
-                                >
-                                  <Edit2 size={13} color="#7c3aed" />
-                                  Manual Override
-                                </span>
+                                <span className="text-muted text-xs">—</span>
                               )}
                             </td>
                             <td style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-                              {r.marked_at ? new Date(r.marked_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'N/A'}
+                              {log.reason || 'Operational record'}
                             </td>
                           </tr>
-                        ))
-                      )}
-                    </tbody>
-                  </table>
-                </div>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )
+              ) : (
+                /* View 2: Confirmed Roster Records Table */
+                loadingDetail ? (
+                  <div style={{ textAlign: 'center', padding: '2rem 0', color: 'var(--text-secondary)' }}>
+                    <RefreshCw size={22} className="spin" style={{ margin: '0 auto 0.5rem auto' }} />
+                    <div>Loading confirmed student records...</div>
+                  </div>
+                ) : (
+                  <div className="table-responsive" style={{ border: '1px solid var(--border-color)', borderRadius: '10px' }}>
+                    <table className="data-table" style={{ margin: 0 }}>
+                      <thead>
+                        <tr>
+                          <th>Roll Number</th>
+                          <th>Student Name</th>
+                          <th>Status</th>
+                          <th>Verification Method</th>
+                          <th>Marked Time</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredRecords.length === 0 ? (
+                          <tr>
+                            <td colSpan="5" style={{ textAlign: 'center', padding: '1.5rem', color: 'var(--text-muted)' }}>
+                              No students match your search filter.
+                            </td>
+                          </tr>
+                        ) : (
+                          filteredRecords.map((r) => (
+                            <tr key={r.id}>
+                              <td>
+                                <strong>{r.roll_number}</strong>
+                              </td>
+                              <td style={{ fontWeight: 600 }}>{r.student_name}</td>
+                              <td>
+                                {r.status === 'present' ? (
+                                  <span className="badge badge-success" style={{ gap: '0.3rem' }}>
+                                    <UserCheck size={13} /> Present
+                                  </span>
+                                ) : r.status === 'absent' ? (
+                                  <span className="badge badge-danger" style={{ gap: '0.3rem' }}>
+                                    <UserX size={13} /> Absent
+                                  </span>
+                                ) : (
+                                  <span className="badge badge-warning" style={{ gap: '0.3rem' }}>
+                                    <Clock size={13} /> Late
+                                  </span>
+                                )}
+                              </td>
+                              <td>
+                                {/* Method Badge: Face Recognition vs Manual Override */}
+                                {r.method === 'face' ? (
+                                  <span
+                                    className="badge"
+                                    style={{
+                                      backgroundColor: '#ecfdf5',
+                                      color: '#065f46',
+                                      border: '1px solid #a7f3d0',
+                                      gap: '0.35rem',
+                                      fontWeight: 600,
+                                    }}
+                                    title="Marked automatically by Face Recognition engine"
+                                  >
+                                    <Camera size={13} color="#059669" />
+                                    Face Recognition
+                                    {r.confidence_score ? (
+                                      <span style={{ fontSize: '0.72rem', opacity: 0.85 }}>
+                                        ({Math.round(r.confidence_score * 100)}%)
+                                      </span>
+                                    ) : null}
+                                  </span>
+                                ) : (
+                                  <span
+                                    className="badge"
+                                    style={{
+                                      backgroundColor: '#f5f3ff',
+                                      color: '#5b21b6',
+                                      border: '1px solid #ddd6fe',
+                                      gap: '0.35rem',
+                                      fontWeight: 600,
+                                    }}
+                                    title="Manually verified or overridden by teacher"
+                                  >
+                                    <Edit2 size={13} color="#7c3aed" />
+                                    Manual Override
+                                  </span>
+                                )}
+                              </td>
+                              <td style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                                {r.marked_at ? new Date(r.marked_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'N/A'}
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                )
               )}
             </>
           )}
@@ -594,6 +899,94 @@ const SessionHistoryModal = ({ isOpen, onClose, batch }) => {
           </button>
         </div>
       </div>
+
+      {/* Admin Unlock Modal Overlay */}
+      {isUnlockModalOpen && (
+        <div
+          className="modal-overlay"
+          style={{
+            zIndex: 110,
+            backgroundColor: 'rgba(0, 0, 0, 0.65)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <div
+            className="modal-content"
+            style={{
+              maxWidth: '480px',
+              width: '90%',
+              borderRadius: '14px',
+              padding: '1.5rem',
+              backgroundColor: '#ffffff',
+              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.25)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', marginBottom: '1rem' }}>
+              <div
+                style={{
+                  width: '36px',
+                  height: '36px',
+                  borderRadius: '10px',
+                  backgroundColor: '#fef3c7',
+                  color: '#b45309',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <Unlock size={20} />
+              </div>
+              <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700 }}>
+                Unlock Attendance Session
+              </h3>
+            </div>
+
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '1rem', lineHeight: '1.45' }}>
+              This session is currently locked under the <strong>24-hour tamper-proofing policy</strong> to guarantee roster integrity.
+              As an Administrator, please provide a verifiable justification to record in the permanent audit trail:
+            </p>
+
+            <form onSubmit={handleUnlockSession}>
+              <textarea
+                className="select-input"
+                style={{
+                  width: '100%',
+                  minHeight: '85px',
+                  resize: 'vertical',
+                  marginBottom: '1.25rem',
+                  fontSize: '0.85rem',
+                  padding: '0.65rem',
+                }}
+                placeholder="e.g. Student dispute resolved: medical certificate verified for STU-105; status updated from absent to present."
+                value={unlockReason}
+                onChange={(e) => setUnlockReason(e.target.value)}
+                required
+              />
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
+                <button
+                  type="button"
+                  onClick={() => setIsUnlockModalOpen(false)}
+                  disabled={submittingLock}
+                  className="btn btn-secondary"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={submittingLock || !unlockReason.trim()}
+                  className="btn btn-primary"
+                  style={{ gap: '0.35rem' }}
+                >
+                  <Unlock size={15} /> Confirm & Unlock
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

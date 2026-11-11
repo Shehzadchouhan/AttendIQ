@@ -8,6 +8,8 @@ class StudentBase(BaseModel):
     full_name: str = Field(..., examples=["Aarav Patel"])
     email: Optional[str] = Field(None, examples=["aarav@example.com"])
     phone: Optional[str] = Field(None, examples=["+91 9876543210"])
+    parent_name: Optional[str] = Field(None, examples=["Rajesh Patel"])
+    parent_phone: Optional[str] = Field(None, examples=["+91 9876543210"])
     is_active: bool = True
 
 
@@ -20,11 +22,14 @@ class StudentUpdate(BaseModel):
     full_name: Optional[str] = None
     email: Optional[str] = None
     phone: Optional[str] = None
+    parent_name: Optional[str] = None
+    parent_phone: Optional[str] = None
     is_active: Optional[bool] = None
 
 
 class StudentResponse(StudentBase):
     id: int
+    creator_id: Optional[int] = None
     consent_given: bool = False
     consent_at: Optional[datetime] = None
     created_at: datetime

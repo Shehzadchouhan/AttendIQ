@@ -140,3 +140,29 @@ def test_upload_face_payload_too_large(client, admin_headers):
     )
     assert res.status_code == 413
     assert "exceeds maximum allowed size" in res.json()["detail"]
+
+
+def test_biometric_data_retention_purge(client, admin_headers, teacher_headers, db):
+    # Create inactive student with embedding
+    stu = Student(roll_number="INACT-001", full_name="Graduated Student", is_active=False)
+    db.add(stu)
+    db.commit()
+
+    emb = FaceEmbedding(student_id=stu.id, embedding_data=[0.1] * 512)
+    db.add(emb)
+    db.commit()
+
+    # Teacher attempt -> 403 Forbidden (Admin only)
+    res_teacher = client.post("/api/v1/students/privacy/purge-inactive-faces", headers=teacher_headers)
+    assert res_teacher.status_code == 403
+
+    # Admin purge -> 200 OK
+    res_admin = client.post("/api/v1/students/privacy/purge-inactive-faces", headers=admin_headers)
+    assert res_admin.status_code == 200
+    data = res_admin.json()
+    assert data["purged_students_count"] >= 1
+    assert data["deleted_embeddings_count"] >= 1
+
+    # Verify embeddings are deleted
+    remaining = db.query(FaceEmbedding).filter(FaceEmbedding.student_id == stu.id).count()
+    assert remaining == 0
