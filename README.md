@@ -1,4 +1,4 @@
-# FaceMark — Attendance System (Phase 1, Phase 2, Phase 3 & Phase 4)
+# AttendIQ— Attendance System (Phase 1, Phase 2, Phase 3 & Phase 4)
 
 [![FaceMark CI](https://github.com/facemark/facemark/actions/workflows/ci.yml/badge.svg)](https://github.com/facemark/facemark/actions/workflows/ci.yml)
 ![Python 3.11](https://img.shields.io/badge/Python-3.11-blue.svg)
