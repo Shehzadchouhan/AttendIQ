@@ -7,7 +7,9 @@ This folder contains the complete, verified, and formatted B.Tech Four Weeks Ind
 
 ## 📁 Folder Contents
 
+- **`AttendIQ_TR103_Presentation.pptx`**: The complete, defense-ready 18-slide PowerPoint presentation (16:9 widescreen) for the final TR-103 Viva examination before the GNDEC faculty committee. Includes embedded high-resolution architecture diagrams, biometrics flowcharts, test coverage metrics, real application screenshots, competitive matrices, and comprehensive presenter speaker notes on every slide.
 - **`AttendIQ_TR103_Training_Report.docx`**: The complete production training report in Microsoft Word format, strictly following GNDEC TR-103 formatting rules (Times New Roman 12pt double-spaced, 3.5cm left margin, standard 6 chapters, references in IEEE style, and annexures).
+- **`FaceMark_TR103_Training_Report.docx`**: The alternate-titled production training report under the FaceMark project nomenclature.
 - **`figures/`**: All high-resolution figures and live UI screenshots embedded in the report:
   - System architecture diagram (`fig_3_1_architecture.png`)
   - Biometric recognition pipeline flowchart (`fig_3_2_biometrics_flow.png`)
