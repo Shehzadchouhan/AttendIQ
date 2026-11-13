@@ -1,0 +1,25 @@
+title: "AttendIQ (FaceMark) - TR-103 Training Diary"
+description: "TR-103 Four Weeks Industrial Training Daily Diary — B.Tech CSE, GNDEC Ludhiana"
+author:
+  name: "Mohd Shehzad"
+  email: "shehzadchouhan260@gmail.com"
+
+# GitHub Pages URL configuration
+baseurl: "/AttendIQ"
+url: "https://shehzadchouhan.github.io"
+
+# Minimal theme
+theme: minima
+
+# Markdown and Link Settings
+plugins:
+  - jekyll-relative-links
+
+relative_links:
+  enabled: true
+  collections: true
+
+markdown: kramdown
+kramdown:
+  input: GFM
+  syntax_highlighter: rouge

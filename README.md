@@ -187,3 +187,31 @@ docker compose exec frontend npm test
 ### Q4: When and why should an administrator switch to `MODEL_NAME=buffalo_s`?
 * `buffalo_s` is a lightweight, mobile-optimized InsightFace model (~85 MB) designed for resource-constrained environments.
 * When hosting FaceMark on budget cloud servers with 1GB to 2GB RAM (e.g. \$4&ndash;\$6/mo VMs), setting `MODEL_NAME=buffalo_s` reduces inference RAM by ~65% (~500MB total), ensuring snappy attendance recognition without requiring expensive multi-gigabyte cloud instances.
+
+---
+
+## TR-103 Daily Training Diary (GitHub Pages)
+
+The daily industrial training diary for academic evaluation (**TR-103**, GNDEC Ludhiana) is published at:  
+👉 **[https://shehzadchouhan.github.io/AttendIQ/](https://shehzadchouhan.github.io/AttendIQ/)**
+
+### How to Add Today's Entry
+
+To generate a new daily diary entry from genuine Git commits:
+
+1. **Run the Diary Generator**:
+   ```bash
+   python scripts/new_diary_entry.py
+   ```
+   *(Or pass a specific date: `python scripts/new_diary_entry.py 2026-11-13`)*
+
+2. **Review and Refine**:
+   The script inspects all commits made on that date, drafts `diary/days/YYYY-MM-DD.md`, and opens it in your editor. Review and customize the **Problems Faced & Design Decisions** and **Learnings** sections.
+
+3. **Stage, Commit and Deploy**:
+   ```bash
+   git add diary/days/YYYY-MM-DD.md
+   git commit -m "docs(diary): add daily entry for YYYY-MM-DD"
+   git push origin main
+   ```
+   The GitHub Actions workflow (`.github/workflows/deploy-diary.yml`) will automatically build and publish the entry to GitHub Pages.
